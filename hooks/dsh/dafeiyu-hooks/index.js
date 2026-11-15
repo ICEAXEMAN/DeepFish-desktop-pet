@@ -80,6 +80,7 @@ export function apply(ctx, config) {
   const turnStart = new Map() // agentId -> 用户发消息的时间（毫秒）
   const thinkTimers = new Map() // agentId -> 思考超时计时器（一分钟的和三分钟的两个）
   let lastNewSession = 0
+  const greeted = new Set() // 已经用「新会话」打过招呼的 agent；新工作区恢复旧会话时兜底
 
   function clearThink(id) {
     for (const t of thinkTimers.get(id) || []) clearTimeout(t)
@@ -111,7 +112,14 @@ export function apply(ctx, config) {
       actx.on('agent/error', () => { clearThink(agent.id); void sendEvent('出错') })
       actx.on('agent/inbox/inserted', () => {
         turnStart.set(agent.id, Date.now())
-        void sendEvent('收到')
+        // 新工作区恢复旧会话时不一定有 agent/created；第一次说话补一次「新会话」
+        if (isRoot(agent) && !greeted.has(agent.id)) {
+          greeted.add(agent.id)
+          void log(`first message -> 新会话 ${agent.id}`)
+          void sendEvent('新会话')
+        } else {
+          void sendEvent('收到')
+        }
         // 思考超时：3 分钟后这一轮还没结束就喊一声（只喊一次）；中途调用工具不再取消计时。又来一条新消息会重新计时，这一轮结束（turn-stopping）或出错才取消
         clearThink(agent.id)
         thinkTimers.set(agent.id, [
@@ -131,7 +139,7 @@ export function apply(ctx, config) {
         void sendEvent(started && Date.now() - started > LONG_TASK ? '长任务完成' : '完成')
       })
     })
-    disposers.set(agent.id, () => { turnStart.delete(agent.id); clearThink(agent.id); dispose() })
+    disposers.set(agent.id, () => { turnStart.delete(agent.id); clearThink(agent.id); greeted.delete(agent.id); dispose() })
     void log(`registered ${agent.id}`)
   }
 
@@ -139,7 +147,7 @@ export function apply(ctx, config) {
   try {
     const agents = ctx.get?.('agents')
     const list = agents?.list?.() || agents?.roots?.() || []
-    for (const agent of list) registerAgent(agent)
+    for (const agent of list) { registerAgent(agent); greeted.add(agent.id) } // 已经在跑的老会话不补打招呼
   } catch {}
 
   // 2. 未来新创建的 agent。
@@ -150,6 +158,7 @@ export function apply(ctx, config) {
     const now = Date.now()
     if (agent && isRoot(agent) && now - lastNewSession > NEW_SESSION_GAP) {
       lastNewSession = now
+      greeted.add(agent.id)
       void log(`new session ${agent.id}`)
       void sendEvent('新会话')
     }
