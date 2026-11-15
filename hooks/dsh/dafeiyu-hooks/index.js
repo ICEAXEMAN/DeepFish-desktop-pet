@@ -1,6 +1,8 @@
 // 大肥鱼事件转发：把 DSH 的 Agent 事件转发给桌宠，让她按 events.txt 演一小下。
 // 不经过模型、不花 token；发不出去静默。事件是 scope-filtered 的（@deepseek-ai/dsh-scope）：
 // agent/* 事件要挂在每个 agent 的 ctx 上（agent.ctx），tools/result、subagent/end 挂在 root ctx。
+// 压缩（/compact、上下文满了自动压）没有自己的 ctx 事件，compaction/* 只写会话日志，
+// 所以挂在 agent.ctx 的 session/event 上，看 compaction/start 与 compaction/end（用户 2026-11-16 加）。
 import { readFile, appendFile } from 'node:fs/promises'
 
 export const name = 'dafeiyu-hooks'
@@ -12,7 +14,6 @@ const FAILED = /(\b[1-9]\d*\s+(failed|failing|errors?)\b|\bFAILED\b|\bFailed!|�
 const LONG_TASK = 180 * 1000 // 这一轮从用户发消息算起超过 3 分钟算「长任务」
 const THINK_LOAD = 60 * 1000 // 收到消息 1 分钟后这一轮还没做完，演「思考一分钟」（半睁/闭眼/斜眼 + 加载，不带台词；用户 2026-11-14 加）
 const THINK_TIMEOUT = 3 * 60 * 1000 // 收到消息 3 分钟后这一轮还没做完、用户也没再发新消息，算「思考超时」（用户 2026-11-14：30 秒改成 5 分钟又改成 3 分钟，并去掉“没有工具调用”这个条件）
-const NEW_SESSION_GAP = 10 * 1000 // 新会话事件的最小间隔，防止子代理字段认错时连喊
 
 export function apply(ctx, config) {
   const apiPath = config?.apiPath // 插件里的 api.json（cordis.patch.yml 里填）
@@ -76,7 +77,7 @@ export function apply(ctx, config) {
   const disposers = new Map()
   const turnStart = new Map() // agentId -> 用户发消息的时间（毫秒）
   const thinkTimers = new Map() // agentId -> 思考超时计时器（一分钟的和三分钟的两个）
-  let lastNewSession = 0
+  const announced = new Set() // 已经喊过开工/继续会话的 agent（同一个 agent 不喊第二次；冷却交给桌宠那边的 events.txt，和 Claude 一样）
 
   function clearThink(id) {
     for (const t of thinkTimers.get(id) || []) clearTimeout(t)
@@ -129,6 +130,24 @@ export function apply(ctx, config) {
       })
       actx.on('approval/request', (_req, next) => { void sendEvent('授权'); return next() })
       actx.on('user-questions/request', (_req, next) => { void sendEvent('等你'); return next() })
+      // 压缩（用户 2026-11-16：和 Claude Code 的 /compact 对齐，台词在 events.txt 里共用）。
+      // compaction/start 在整理前同步追加，compaction/summary 是摘要写完，compaction/end 收尾（失败也追加，带 error）。
+      // 手动 /compact 带 sourceCommandId、turn 为 null；上下文满了自动压发生在轮次里。两个都算，和 Claude 的 PreCompact 一样分不出来。
+      actx.on('session/event', (session, event) => {
+        if (!event) return
+        // agent 级订阅本来就只收这个 agent 的会话；id 对得上更稳，形状不对时不拦（万一是别的 id 空间）
+        const sid = session?.id
+        if (sid && agent?.id && String(sid) !== String(agent.id)) return
+        const data = event.data || {}
+        if (event.type === 'compaction/start') {
+          void log(`compaction/start turn=${data.turn} manual=${data.sourceCommandId ? 'yes' : 'no'}`)
+          void sendEvent('压缩开始')
+        } else if (event.type === 'compaction/end') {
+          void log(`compaction/end turn=${data.turn} error=${data.error || 'none'}`)
+          // 压缩失败（error 有值）不演「整理完啦」，不然是骗人
+          if (!data.error) void sendEvent('压缩完成')
+        }
+      })
     })
     disposers.set(agent.id, () => { turnStart.delete(agent.id); clearThink(agent.id); dispose() })
     void log(`registered ${agent.id}`)
@@ -141,17 +160,48 @@ export function apply(ctx, config) {
     for (const agent of list) registerAgent(agent)
   } catch {}
 
+  // 这个 agent 是不是“接着以前的会话”（用户 2026-11-16：DSH 也要分开工 / 继续会话，和 Claude 一样）。
+  // DSH 没有明说的 source 字段，所以多认几种：载荷或 agent 上有“恢复/重开”的标记，或者 agent 是早就创建好的（创建时间远早于现在）。
+  // 认不出就当新会话。每个 agent 创建时都会把能看到的字段写进 hook.log（created ... resumed=...），方便对着真实情况再调。
+  function wasResumed(payload, agent) {
+    for (const holder of [payload, agent]) {
+      if (!holder || typeof holder !== 'object') continue
+      for (const key of ['resumed', 'restored', 'isRestored', 'isResumed', 'loaded', 'hydrated', 'fromHistory', 'reopened']) {
+        if (holder[key] === true) return true
+      }
+      for (const key of ['source', 'reason', 'kind', 'origin', 'mode', 'trigger']) {
+        if (typeof holder[key] === 'string' && /resum|restor|load|hydrat|histor|reopen|continue|recover/i.test(holder[key])) return true
+      }
+    }
+    for (const key of ['createdAt', 'created', 'startedAt', 'startTime', 'createTime']) {
+      const raw = agent?.[key] ?? payload?.[key]
+      const at = typeof raw === 'number' ? (raw < 1e12 ? raw * 1000 : raw) : typeof raw === 'string' ? Date.parse(raw) : NaN
+      if (Number.isFinite(at) && Date.now() - at > 60 * 1000) return true
+    }
+    return false
+  }
+
+  function describe(payload, agent) {
+    const brief = (obj) => {
+      if (!obj || typeof obj !== 'object') return String(obj)
+      return Object.keys(obj).slice(0, 40).map((key) => {
+        const v = obj[key]
+        return typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean' ? `${key}=${String(v).slice(0, 40)}` : key
+      }).join(',')
+    }
+    return `payload[${brief(payload)}] agent[${brief(agent)}]`
+  }
+
   // 2. 未来新创建的 agent。
   const offCreated = ctx.on('agent/created', (payload) => {
     const agent = payload?.agent
     registerAgent(agent)
-    // 新会话：只有根 agent 才喊，子代理不喊；10 秒内不重复
-    const now = Date.now()
-    if (agent && isRoot(agent) && now - lastNewSession > NEW_SESSION_GAP) {
-      lastNewSession = now
-      void log(`new session ${agent.id}`)
-      void sendEvent('新会话')
-    }
+    // 只有根 agent 才喊，子代理不喊；新会话演“开工”，接着以前的会话演“继续会话”（台词和冷却都在 events.txt，和 Claude 一样）
+    if (!agent || !isRoot(agent) || announced.has(agent.id)) return
+    announced.add(agent.id)
+    const resumed = wasResumed(payload, agent)
+    void log(`created ${agent.id} resumed=${resumed} ${describe(payload, agent)}`)
+    void sendEvent(resumed ? '继续会话' : '开工')
   })
 
   // 3. subagent/end 挂在 root 上（已验证能收到）。
