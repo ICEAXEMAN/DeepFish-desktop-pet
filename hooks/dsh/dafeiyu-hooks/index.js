@@ -112,11 +112,11 @@ export function apply(ctx, config) {
       actx.on('agent/error', () => { clearThink(agent.id); void sendEvent('出错') })
       actx.on('agent/inbox/inserted', () => {
         turnStart.set(agent.id, Date.now())
-        // 新工作区恢复旧会话时不一定有 agent/created；第一次说话补一次「新会话」
+        // 新工作区恢复旧会话时不一定有 agent/created；第一次说话补一次「开工」
         if (isRoot(agent) && !greeted.has(agent.id)) {
           greeted.add(agent.id)
-          void log(`first message -> 新会话 ${agent.id}`)
-          void sendEvent('新会话')
+          void log(`first message -> 开工 ${agent.id}`)
+          void sendEvent('开工')
         } else {
           void sendEvent('收到')
         }
@@ -159,14 +159,16 @@ export function apply(ctx, config) {
   // 2. 未来新创建的 agent。
   const offCreated = ctx.on('agent/created', (payload) => {
     const agent = payload?.agent
+    const source = payload?.source
     registerAgent(agent)
     // 新会话：只有根 agent 才喊，子代理不喊；10 秒内不重复
     const now = Date.now()
     if (agent && isRoot(agent) && now - lastNewSession > NEW_SESSION_GAP) {
       lastNewSession = now
       greeted.add(agent.id)
-      void log(`new session ${agent.id}`)
-      void sendEvent('新会话')
+      const event = source === 'startup' ? '开工' : '新会话'
+      void log(`new session ${agent.id} source=${source || '?'} -> ${event}`)
+      void sendEvent(event)
     }
   })
 
