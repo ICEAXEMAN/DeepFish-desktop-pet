@@ -147,7 +147,13 @@ export function apply(ctx, config) {
   try {
     const agents = ctx.get?.('agents')
     const list = agents?.list?.() || agents?.roots?.() || []
-    for (const agent of list) { registerAgent(agent); greeted.add(agent.id) } // 已经在跑的老会话不补打招呼
+    const initiator = agents?.currentInitiator?.()
+    void log(`initiator ${initiator?.id || 'none'}`)
+    for (const agent of list) {
+      registerAgent(agent)
+      // 只把发起这次加载的当前 agent 当成“已经打过招呼”；别的开着的工作区等第一次说话再补
+      if (agent.id === initiator?.id || (!initiator && agent === list[0])) greeted.add(agent.id)
+    }
   } catch {}
 
   // 2. 未来新创建的 agent。
