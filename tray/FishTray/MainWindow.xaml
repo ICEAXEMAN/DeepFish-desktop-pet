@@ -198,7 +198,7 @@
                             <TextBlock Text="固定台词语音包" Style="{StaticResource Caption}" Margin="0,2,0,8"/>
                             <!-- 冷静、沉稳那套不随插件打包了（用户 2026-11-15）：选项留着，但是点不动，这行说明为什么 -->
                             <TextBlock x:Name="VoiceHint" Style="{StaticResource Caption}" Foreground="#E6B45F" TextWrapping="Wrap" Margin="0,0,0,8" Visibility="Collapsed"
-                                       Text="其余音色还在施工中……"/>
+                                       Text="更多声线正在施工中……"/>
                             <Border x:Name="VoiceHost" Background="#6608102F" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="10" Margin="0,0,0,14"/>
                             <StackPanel x:Name="VolumePanel">
                                 <Grid>

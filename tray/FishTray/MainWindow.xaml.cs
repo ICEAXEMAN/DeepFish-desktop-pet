@@ -107,7 +107,7 @@ public partial class MainWindow : Window
             calm.IsEnabled = false;
             calm.Opacity = 0.45;
             calm.Cursor = Cursors.No;
-            calm.ToolTip = "其余音色还在施工中……";
+            calm.ToolTip = "更多声线正在施工中……";
             VoiceHint.Visibility = Visibility.Visible;
         }
         BuildSections();
