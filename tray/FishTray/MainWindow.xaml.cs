@@ -107,7 +107,7 @@ public partial class MainWindow : Window
             calm.IsEnabled = false;
             calm.Opacity = 0.45;
             calm.Cursor = Cursors.No;
-            calm.ToolTip = "这套录音没随插件打包（在桌面的「大肥鱼_冷静语音包」压缩包里）";
+            calm.ToolTip = "其余音色还在施工中……";
             VoiceHint.Visibility = Visibility.Visible;
         }
         BuildSections();
