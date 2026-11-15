@@ -11,6 +11,8 @@ namespace FishTray;
 // 大肥鱼的图标：深蓝圆底 + 冰蓝线条小鲸鱼。托盘图标、窗口图标、面板抬头都用同一个画法。
 internal static class Whale
 {
+
+
     internal static Bitmap Draw(int s, bool badge = true)
     {
         var bmp = new Bitmap(s, s, PixelFormat.Format32bppArgb);
