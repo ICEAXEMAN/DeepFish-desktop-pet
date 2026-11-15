@@ -123,8 +123,6 @@ export function apply(ctx, config) {
         if (wasInterrupted(payload)) return void sendEvent('中断')
         void sendEvent(started && Date.now() - started > LONG_TASK ? '长任务完成' : '完成')
       })
-      actx.on('approval/request', (_req, next) => { void sendEvent('授权'); return next() })
-      actx.on('user-questions/request', (_req, next) => { void sendEvent('等你'); return next() })
     })
     disposers.set(agent.id, () => { turnStart.delete(agent.id); clearThink(agent.id); dispose() })
     void log(`registered ${agent.id}`)
@@ -153,6 +151,10 @@ export function apply(ctx, config) {
   // 3. subagent/end 挂在 root 上（已验证能收到）。
   const offSubagent = ctx.on('subagent/end', () => void sendEvent('子任务完成'))
 
+  // 4. 授权和用户提问是 root 级 waterfall，不是 agent 级；之前挂在 agent 上收不到。
+  const offApproval = ctx.on('approval/request', (_req, next) => { void sendEvent('授权'); return next() })
+  const offQuestion = ctx.on('user-questions/request', (_req, next) => { void sendEvent('等你'); return next() })
+
   // 4. tools/result 挂在 root 上（Scoped<ToolsService>，和 subagent/end 一样不是 agent 级）：命令执行完。
   const offTools = ctx.on('tools/result', (exec, result) => {
     clearAllThink() // 开始动手了，不算在发呆
@@ -179,6 +181,8 @@ export function apply(ctx, config) {
   return () => {
     offCreated?.()
     offSubagent?.()
+    offApproval?.()
+    offQuestion?.()
     offTools?.()
     clearAllThink()
     for (const d of disposers.values()) d?.()

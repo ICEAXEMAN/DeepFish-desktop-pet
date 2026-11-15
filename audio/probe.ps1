@@ -1,4 +1,4 @@
-param([int]$IntervalMs = 50, [int]$ParentPid = 0)
+﻿param([int]$IntervalMs = 50, [int]$ParentPid = 0)
 
 # 大肥鱼的耳朵：抓电脑正在播放的声音，每 IntervalMs 毫秒往 stdout 打一行 JSON：
 #   {"peak":0.0578,"rms":0.0181,"bands":[16 个 0~1]}

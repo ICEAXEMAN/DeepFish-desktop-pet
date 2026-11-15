@@ -2,7 +2,7 @@
 #   powershell -ExecutionPolicy Bypass -File setup.ps1          检查并编译
 #   powershell -ExecutionPolicy Bypass -File setup.ps1 -Check   编译完再开一个看不见的桌宠试一遍（推荐）
 # 缺什么就停下，告诉你缺什么、去哪里拿；不会自己下载 Live2D 的 SDK 或模型（它们要你自己同意各自的许可）。
-param([switch]$Check)
+param([switch]$Check, [switch]$NoDesktopShortcut)
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 $root = $PSScriptRoot
@@ -103,8 +103,20 @@ if ($Check) {
     if ($LASTEXITCODE -ne 0) { Missing '自检没通过，看上面的输出；还有问题看插件里的 errors.log。' }
 }
 
+# 桌面快捷方式：第一次部署时在桌面生成一个带 Logo 的「大肥鱼桌宠」图标（双击叫她出来 / 没跑就启动）。
+# 不想要就加 -NoDesktopShortcut；以后想补一个，单独运行 创建桌面快捷方式.ps1 也行。
+# 别因为这一步失败就中断安装：只提示，不影响已经编译好的东西。
+if (!$NoDesktopShortcut) {
+    $maker = Join-Path $root '创建桌面快捷方式.ps1'
+    if (Test-Path -LiteralPath $maker) {
+        Write-Host ''
+        try { & $maker | Out-Host }
+        catch { Write-Host ('! 桌面快捷方式没建成：' + $_.Exception.Message + '（可以稍后单独运行 创建桌面快捷方式.ps1）') -ForegroundColor Yellow }
+    }
+}
+
 Write-Host ''
-Write-Host '编译和自检通过了，但还没接到 Agent 上。下一步：把下面这个 MCP 服务接进你的 Agent（stdio，没有参数）：' -ForegroundColor Cyan
+Write-Host '装好了。把下面这个 MCP 服务接进你的 Agent（stdio，没有参数）：' -ForegroundColor Cyan
 Write-Host ('  ' + $mcp)
 Write-Host '  Claude Code： claude mcp add dafeiyu -s user -- "' -NoNewline; Write-Host ($mcp + '"')
 Write-Host '  其他 Agent：在它的 MCP 配置里加 { "command": "' -NoNewline; Write-Host (($mcp -replace '\\', '\\') + '" }')

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Windows.Threading;
 
@@ -202,6 +202,7 @@ internal sealed partial class PetWindow
         if (body.Posing) return "摆姿势";
         if (SkitOn) return "演小剧场";
         if (silent != null) return "做静默表情";
+        if (voice != null) return "放语音";
         if (speech.IsSaying) return "说话";
         return null;
     }

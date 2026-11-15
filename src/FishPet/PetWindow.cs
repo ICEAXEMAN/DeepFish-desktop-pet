@@ -35,6 +35,7 @@ internal sealed partial class PetWindow : Window
     private readonly Body body;
     private readonly BubbleWindow mutter; // 待机自言自语的小气泡
     private readonly Speech mutterSpeech; // 嘀咕/小剧场/事件也用 Speech 打字，好让嘴跟着字动（2026-11-06）
+    private Voice? voicePack; // 固定台词的录音（voice\ 或 voice_calm\）；没有这个文件夹就照旧只说话不上声
     private static readonly HttpClient Http = new();
     private readonly Random random = new();
     private readonly Dictionary<string, string> textCues = []; // 固定嘀咕文本 → 表情动作
@@ -55,6 +56,11 @@ internal sealed partial class PetWindow : Window
     // （WS_EX_NOACTIVATE 的窗口点了不会自己浮上来）。
     private DateTime nextTopmostLook;
     private DateTime topmostLostLogged;
+    // 本机加（2026-11-11，2026-11-13 从合并前的备份挪回来）：上面那个“每秒看一次标记”不够。实测她可以在
+    // 置顶标记还挂着的时候就被排到普通窗口（Edge、Claude）后面，那时只有真的再调一次“置顶”才会跳回最上层。
+    // 所以每隔 0.7 秒看一眼 Z 序，谁压着她就把她和气泡一起抬上去。
+    private DateTime nextRaise;
+    private DateTime coveredLogged;
     private Player? player;
     // 哄睡演示（coax）：记住她原来的位置和大小，好归位。
     private double? coaxLeft, coaxTop;
@@ -68,7 +74,7 @@ internal sealed partial class PetWindow : Window
     private int mutterToken;
     private bool textIdleActive;
     private bool coaxHoldPose;
-    private string? coaxStage4Text; // 第四层台词（到点时取自 alarms.txt；演示时为空，用固定的那句）
+    private string? coaxStage4Text; // 第四层台词（由 AI 实时生成传入）
     private ControlServer? server;
     private HttpApi? api;
     private string? trouble;
@@ -99,8 +105,14 @@ internal sealed partial class PetWindow : Window
     private DateTime? relaxAt;
     private const double LingerSeconds = 3.5;
 
-    // Her mouth, while the words come out.
+    // Her recorded voice, and her mouth.
+    private readonly MediaPlayer voicePlayer = new();
+    // 用户嫌吵（2026-11-10）：把原来的 25% 响度当作新的满档，控制台 100% = 以前 25%
+    private const double VoiceGain = 0.25;
+    private float[]? voice;
+    private DateTime voiceUntil;
     private double mouth;
+    private const int VoiceStepMilliseconds = 33;
 
     // Every line she says is filmed, for looking back at afterwards; kept half an hour.
     private sealed record Photo(DateTime At, string Said, string Picture);
@@ -140,6 +152,10 @@ internal sealed partial class PetWindow : Window
         LoadTouchFile();
         speech = new Speech(bubble) { Seconds = settings.BubbleSeconds };
         mutterSpeech = new Speech(mutter) { Seconds = -1 }; // 停留由嘀咕/小剧场/事件自己控制，Speech 不自动收
+        voicePack = null;
+        LoadVoicePack();
+        voicePlayer.Volume = settings.Volume * VoiceGain; // 语音音量（settings: volume，控制台里能调；VoiceGain 是总衰减）
+        _ = Tts.Warm(settings); // 提前把实时语音的第一次冷启动跑掉
         body = new Body(Send);
         updates = new Updates(Places.Root, Places.Log);
         behavior = new Behavior(Send, () => [.. settings.Outfit, .. body.Overlays], new Random()) { HandBusy = () => body.HandUp, Ended = body.Restore, IdleStarted = name => OnIdleStarted(name), TextIdle = text => PlayTextIdle(text), TextIdleMoods = textCues.Keys.ToArray(), SkitIdle = name => PlaySkit(name), SkitIdleMoods = skits.Keys.ToArray(),
@@ -248,6 +264,7 @@ internal sealed partial class PetWindow : Window
         Recorder.Expect((int)(Width * scale), (int)(Height * scale));
         started.Start(model, Shape, settings.Outfit, (int)(Width * scale), (int)(Height * scale), settings.Fps, settings.TexScale);
         body.Forget(); silent = null; relaxAt = null;
+        danceSent.Clear(); // 新渲染器不知道上一轮按住过什么，跳舞的参数要重新发一遍（PetWindow.Dance.cs）
         behavior.Resume(DateTime.UtcNow, settings.IdleSeconds);
         timer.Start();
         open = default;
@@ -278,7 +295,7 @@ internal sealed partial class PetWindow : Window
         image.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(300)));
         behavior.Show("问候", DateTime.UtcNow);
         body.Apply("抚胸");
-        WelcomeSoon(); // 全新安装的第一次出场，接着说几句欢迎（只说这一次）
+        WelcomeSoon(); // 新装第一次出场：自己说一段欢迎（Welcome.cs）
     }
 
     private void ApplySize()
@@ -343,8 +360,7 @@ internal sealed partial class PetWindow : Window
         int stage = args.GetProperty("stage").GetInt32();
         if (stage != 0 && Wake()) coaxWoke = stage is >= 1 and <= 4; // 收着时被叫出来演哄睡：演完再自己收回去
         YieldMutter(); // 哄睡演出也优先：嘀咕让位
-        coaxStage4Text = null; // 演示用固定的那句；到点的第四层台词来自 alarms.txt（Ring 里设置），不再接受 Agent 实时生成传入（用户 2026-11-12 去掉）
-        string? skitName = args.TryGetProperty("text", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() : null; // 只有演示小剧场（stage 6）用它
+        coaxStage4Text = args.TryGetProperty("text", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() : null; // 第四层台词（AI 实时生成）
         if (stage == 0)
         {
             CoaxReturn();
@@ -354,7 +370,7 @@ internal sealed partial class PetWindow : Window
         if (stage == 6) // 演示待机小剧场：text 给小剧场名，不给就随机一个
         {
             if (skits.Count == 0) return Tools.Error("skits.txt 里还没有小剧场。");
-            var pick = skitName != null && skits.ContainsKey(skitName) ? skitName : skits.Keys.ElementAt(random.Next(skits.Count));
+            var pick = coaxStage4Text != null && skits.ContainsKey(coaxStage4Text) ? coaxStage4Text : skits.Keys.ElementAt(random.Next(skits.Count));
             PlaySkit(pick, force: true);
             return Tools.Text(new { stage = 6, skit = pick, all = skits.Keys.ToArray() });
         }
@@ -444,7 +460,7 @@ internal sealed partial class PetWindow : Window
         await Task.Delay(350); // 睁眼后停顿一下
         body.Apply("大前倾"); // 身子猛地向前倾
         await Task.Delay(1000);
-        SayLine(coaxStage4Text ?? "为 什 么 还 没 睡 ？", 2); // 每字 0.5 秒
+        SayLine(coaxStage4Text ?? "为 什 么 还 没 睡 ？", null, 2); // 每字 0.5 秒（台词由 AI 实时生成）
     }
 
     // 归位（用户 2026-11-13 改）：先快速鞠躬淡出退场，趁看不见恢复原来的体型、大小、视线跟随，
@@ -490,9 +506,10 @@ internal sealed partial class PetWindow : Window
         StartMusic(); // 出来了才开始听歌（收着的时候不白开采集进程）。要在 standby 落下之后：StartMusic 自己会看 standby
         nextFullscreenLook = default;
         if (player is { } current) UpdateFullscreen(current);
+        RaiseAboveAll(); // 从收起里出来：窗口离开的这段时间可能已经被别的窗口压住了，先回到最上层
         if (ready) image.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(300)));
         if (greet) { behavior.Show("问候", DateTime.UtcNow); body.Apply("抚胸"); }
-        WelcomeSoon(); // 本来收着（start_hidden）的全新安装，第一次被叫出来时说欢迎
+        WelcomeSoon(); // 新装、而且一开就收着：被叫出来的第一次也说欢迎（Welcome.cs）
         return true;
     }
 
@@ -585,12 +602,24 @@ internal sealed partial class PetWindow : Window
     private static string[] ParseProps(string text) =>
         text.Split([' ', '　', '、', '，', ','], StringSplitOptions.RemoveEmptyEntries).Where(name => PetProps.Names.Contains(name)).Distinct().ToArray();
 
+    // 固定台词的录音包（本机加，2026-11-10）：second = voice\，calm = voice_calm\。切换时重新读索引，不用重启。
+    private void LoadVoicePack()
+    {
+        var folder = Path.Combine(Places.Root, settings.VoicePack == "calm" ? "voice_calm" : "voice");
+        if (settings.VoicePack == "calm" && !Directory.Exists(folder)) folder = Path.Combine(Places.Root, "voice");
+        voicePack = Voice.Load(folder);
+        Places.Log($"语音包：{(voicePack == null ? "没有（只说话）" : $"{voicePack.Count} 条")}（{settings.VoicePack}）");
+    }
+
     // touch.txt：「反应|台词」或「反应|台词|亲密3」，点她身体不同位置时随机念一句（反应见 Behavior.ClickMood：摸头/戳脸/开心/护裙/震惊/心虚，连点 5 下是「挨打」，
     // 亲密度满档时戳裙子是「娇羞」）。写了「亲密N」的那句要到第 N 级才会说，而且级别越高的句子越常被挑中（本机加，2026-11-08）。
     private void LoadTouchFile()
     {
+        touchLines.Clear();
+        // 冷静、沉稳包有三条触碰台词换成 语音参考9/10/11 原素材，字幕也跟着换（touch_calm.txt）。
+        var touchFile = settings.VoicePack == "calm" && File.Exists(Path.Combine(Places.Root, "touch_calm.txt")) ? "touch_calm.txt" : "touch.txt";
         // touch.txt 之外，右键抚摸、悬停、头晕的台词（stroke.txt / hover.txt / dizzy.txt）格式一样，一起读进来；哪个文件没有就跳过。
-        foreach (var file in new[] { "touch.txt", "stroke.txt", "hover.txt", "dizzy.txt" })
+        foreach (var file in new[] { touchFile, "stroke.txt", "hover.txt", "dizzy.txt" })
         try
         {
             foreach (var line in File.ReadAllLines(Path.Combine(Places.Root, file)))
@@ -728,8 +757,9 @@ internal sealed partial class PetWindow : Window
         textIdleActive = true;
         if (textCues.TryGetValue(text, out var cue)) body.Apply(cue);
         if (textProps.TryGetValue(text, out var props)) PutOn(props, 6);
+        var voiceSeconds = Speak(text);
         mutterSpeech.Say(new Line(text, body.Apply));
-        await Task.Delay(TimeSpan.FromSeconds(Math.Max(5, text.Length * 0.12 + 1)));
+        await Task.Delay(TimeSpan.FromSeconds(Math.Max(5, (voiceSeconds ?? 0) + 0.4)));
         if (token != mutterToken) return; // 中途被说话打断了，收尾已经做过
         textIdleActive = false;
         mutterSpeech.Stop();
@@ -741,7 +771,15 @@ internal sealed partial class PetWindow : Window
     private async void PlaySkit(string name, bool force = false)
     {
         if (FocusWork && !force) return; // 专注陪伴期间不演小剧场（连语音一起停）
-        if (!skits.TryGetValue(name, out var skit) || (!force && MutterBlocked)) return;
+        if (!skits.TryGetValue(name, out var skit)) return;
+        if (!force && MutterBlocked)
+        {
+            // 正说着话、或刚说完要安静：这次先让过去，45 秒后再试（别白白等满一个待机间隔）
+            behavior.SkitMissed(DateTime.UtcNow);
+            return;
+        }
+        behavior.SkitPlayed(DateTime.UtcNow);
+        Places.Log("小剧场：" + name);
         int token = ++mutterToken;
         skitToken = token; // 演出期间暂时不跟鼠标（Tick 里看 SkitOn）；被打断时 mutterToken 一变就自动算演完
         textIdleActive = true;
@@ -751,8 +789,13 @@ internal sealed partial class PetWindow : Window
             if (step.Cue != null) body.Apply(step.Cue);
             // 台词里用全角「｜」隔开几句，每次随机演其中一句（2026-11-06）。
             var said = step.Text.Contains('｜') ? step.Text.Split('｜')[random.Next(step.Text.Split('｜').Length)].Trim() : step.Text;
+            var voiceSeconds = said.Length > 0 ? Speak(said) : null;
             if (said.Length > 0) mutterSpeech.Say(new Line(said, body.Apply)); else mutterSpeech.Stop();
-            await Task.Delay(TimeSpan.FromSeconds(Math.Max(step.Seconds, said.Length * 0.12 + 0.3)));
+            // 小剧场有录音的句子按录音长度接下一句，只留 0.45 秒气口；没录音 / 纯动作才用脚本里的停留秒数。
+            var wait = said.Length > 0 && voiceSeconds != null
+                ? Math.Max(0.9, voiceSeconds.Value + 0.45)
+                : Math.Max(step.Seconds, said.Length * 0.12 + 0.3); // 没录音时按字数留足气泡出完的时间（上游 2026-11-12）
+            await Task.Delay(TimeSpan.FromSeconds(wait));
             if (token != mutterToken || exiting) return; // 被说话打断了，收尾已经做过
         }
         textIdleActive = false;
@@ -767,7 +810,7 @@ internal sealed partial class PetWindow : Window
 
     // 嘀咕现在能不能出来：她在说话、放语音、做哄睡演出，或刚说完不久，都不行。
     private bool MutterBlocked =>
-        exiting || speech.IsSaying || silent != null || coaxAutoReturn || textIdleActive || DateTime.UtcNow < mutterQuietUntil || (panelHold && body.Posing);
+        exiting || speech.IsSaying || voice != null || silent != null || coaxAutoReturn || textIdleActive || DateTime.UtcNow < mutterQuietUntil || (panelHold && body.Posing);
 
     // 她要开口了：正在演的嘀咕/小剧场马上收起，在途的作废，临时道具摘掉，说话的优先权给她。
     private void YieldMutter()
@@ -788,6 +831,7 @@ internal sealed partial class PetWindow : Window
         await Task.Delay(140);
         mid?.Invoke();
         Left = left; Top = top;
+        RaiseAboveAll(); // 换位/出场后先回到最上层（哄睡把她摆到屏幕正中时，正好压在别的窗口上）
         image.BeginAnimation(OpacityProperty, new DoubleAnimation(1, TimeSpan.FromMilliseconds(fadeInMs)));
     }
 
@@ -839,6 +883,23 @@ internal sealed partial class PetWindow : Window
             UpdateFullscreen(current);
         }
         if (hiddenForFullscreen) return;
+        // 别的程序的窗口（包括刚被点到的普通窗口）跑到她上面时，把她和气泡重新放回最上面（见 ZOrder.cs）：
+        // WPF 的 Topmost 只在设置那一刻生效，标记还挂着、人却已经在后面了，只看标记的 KeepTopmost 发现不了。
+        if (!test && !standby && IsVisible && DateTime.UtcNow >= nextRaise)
+        {
+            nextRaise = DateTime.UtcNow.AddMilliseconds(700);
+            var me = new WindowInteropHelper(this).Handle;
+            if (ZOrder.CoveredByOthers(me))
+            {
+                RaiseAboveAll(me);
+                bubble.Raise(); mutter.Raise(); handWindow?.Raise();
+                if (DateTime.UtcNow - coveredLogged > TimeSpan.FromMinutes(1))
+                {
+                    coveredLogged = DateTime.UtcNow;
+                    Places.Log("有窗口压在她上面，已经把她重新置顶" + Above(me));
+                }
+            }
+        }
         KeepTopmost();
         // Moving the window pushes her body; physics carries that into her hair, skirt and tail.
         // 拖动时按抓点压低这个整体平移：抓点那一头才贴在手上（用户 2026-11-12）
@@ -869,9 +930,9 @@ internal sealed partial class PetWindow : Window
             if (coaxReturnAt is { } at && DateTime.UtcNow >= at) CoaxReturn();
         }
         // Nothing of her own while she says something or still holds the look she said it with.
-        if (speech.IsSaying || silent != null) mutterQuietUntil = DateTime.UtcNow.AddSeconds(10); // 说完后嘀咕再等 10 秒
+        if (voice != null || speech.IsSaying || silent != null) mutterQuietUntil = DateTime.UtcNow.AddSeconds(10); // 说完后嘀咕再等 10 秒
         if (tempProps.Count > 0 && DateTime.UtcNow >= propsUntil) TakeOffProps(); // 临时道具到点自动摘
-        behavior.Tick(DateTime.UtcNow, speech.IsSaying || silent != null || body.Posing || textIdleActive, settings.IdleSeconds); // 嘀咕/小剧场/事件演着的时候，待机抽签和小动作也别插进来（本机修，2026-11-06）
+        behavior.Tick(DateTime.UtcNow, voice != null || speech.IsSaying || silent != null || body.Posing || textIdleActive || Dancing, settings.IdleSeconds); // 嘀咕/小剧场/事件演着的时候，待机抽签和小动作也别插进来（本机修，2026-11-06）；跟着音乐跳的时候也一样（2026-11-10）
         GetCursorPos(out var cursor);
         if (cursor.X != lastCursor.X || cursor.Y != lastCursor.Y)
         {
@@ -939,6 +1000,8 @@ internal sealed partial class PetWindow : Window
     private void GoWithAgent()
     {
         if (test || exiting) return;
+        // 正在收场（退场动画）：等她收完再决定走不走，别让动画演到一半就被打断（用户 2026-11-13）
+        if (hiding) { aloneSince = null; return; }
         // 本机改（2026-11-11）：DSH 每次工具调用可能重开一次 MCP，桥接一断就退场的话托盘小图标也会跟着消失。
         // 留一分钟缓冲：真的把 Agent 关了才会走，只是重连或者闲一会儿不算。还有程序在用网页接口时也留着。
         if ((server?.Connections ?? 0) > 0) { hadAgent = true; aloneSince = null; return; }
@@ -977,64 +1040,13 @@ internal sealed partial class PetWindow : Window
         if (DateTime.UtcNow < nextTopmostLook) return;
         nextTopmostLook = DateTime.UtcNow.AddSeconds(1);
         var handle = new WindowInteropHelper(this).Handle;
-        if (handle == 0) return;
-        if (((long)GetWindowLongPtr(handle, -20) & 0x8) != 0)
-        {
-            // 置顶标记还在，但置顶层里也分先后：别的“总在最前”的程序被点到，就会盖在她上面（本机加，2026-11-13）。
-            if (DateTime.UtcNow < nextCoverRaise) return;
-            var cover = CoveredBy(handle);
-            if (cover == null) return;
-            nextCoverRaise = DateTime.UtcNow.AddSeconds(3); // 对方要是也爱抢最前，别跟它抢得太勤
-            RaiseAboveAll(handle);
-            if (DateTime.UtcNow - topmostLostLogged > TimeSpan.FromMinutes(1))
-            {
-                topmostLostLogged = DateTime.UtcNow;
-                Places.Log("她被别的置顶窗口盖住了，已经抬回最前面；压在上面的是 " + cover);
-            }
-            return;
-        }
+        if (handle == 0 || ((long)GetWindowLongPtr(handle, -20) & 0x8) != 0) return;
         RaiseAboveAll(handle);
         if (DateTime.UtcNow - topmostLostLogged > TimeSpan.FromMinutes(1))
         {
             topmostLostLogged = DateTime.UtcNow;
             Places.Log("窗口的置顶被去掉了（别的程序或系统），已经重新置顶" + Above(handle));
         }
-    }
-
-    private DateTime nextCoverRaise;
-
-    // 置顶层里压在她上面、又和她的窗口重叠的，是哪个程序（没有就返回 null）。
-    // 她自己的气泡和手、任务栏/开始菜单这些系统外壳、被隐藏（cloaked）的和最小化的不算。
-    private static readonly HashSet<string> ShellProcesses = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "explorer", "ShellExperienceHost", "StartMenuExperienceHost", "SearchHost", "SearchApp", "TextInputHost", "LockApp",
-    };
-
-    private static string? CoveredBy(nint handle)
-    {
-        if (!GetWindowRect(handle, out var mine)) return null;
-        uint self = (uint)Environment.ProcessId;
-        var above = handle;
-        for (int step = 0; step < 300 && (above = GetWindow(above, 3)) != 0; step++) // GW_HWNDPREV
-        {
-            if (!IsWindowVisible(above) || IsIconic(above)) continue;
-            if (!GetWindowRect(above, out var other)) continue;
-            int width = Math.Min(mine.Right, other.Right) - Math.Max(mine.Left, other.Left);
-            int height = Math.Min(mine.Bottom, other.Bottom) - Math.Max(mine.Top, other.Top);
-            if (width < 24 || height < 24) continue;
-            // 只管“正经的程序窗口”：不进任务栏的浮层（截图框、录制条、各种弹出面板）和铺满整屏的浮层，她不去盖，也不抢着压过去
-            if (Fullscreen.IsToolWindow(above) || Fullscreen.FillsMonitor(above)) continue;
-            if (DwmGetWindowAttribute(above, 14, out int cloaked, sizeof(int)) == 0 && cloaked != 0) continue; // DWMWA_CLOAKED
-            GetWindowThreadProcessId(above, out uint id);
-            if (id == self) continue;
-            try
-            {
-                var name = Process.GetProcessById((int)id).ProcessName;
-                if (!ShellProcesses.Contains(name) && !Fullscreen.IsCaptureTool(name)) return name;
-            }
-            catch { /* 程序刚好退了：下一秒再看 */ }
-        }
-        return null;
     }
 
     // 丢置顶的时候，压在她上面的是哪个程序（只写日志，好查出是谁撤的）。
@@ -1053,9 +1065,7 @@ internal sealed partial class PetWindow : Window
     {
         if (test || standby || !IsVisible || exiting) return;
         var handle = new WindowInteropHelper(this).Handle;
-        // 本机改（2026-11-13）：只有被“正经的程序窗口”压着才抬。托盘的隐藏图标面板、开始菜单、截图录屏的浮层
-        // 都不算——点她一下就盖到它们上面，会把用户正在用的面板挡住。
-        if (handle != 0 && CoveredBy(handle) != null) RaiseAboveAll(handle);
+        if (handle != 0) RaiseAboveAll(handle);
     }
 
     private static void RaiseAboveAll(nint handle) =>
@@ -1113,6 +1123,8 @@ internal sealed partial class PetWindow : Window
     // 点她时除了身体反应，再念一句对应台词（touch.txt）。用嘀咕的小气泡，嘴跟着字动，按字数停一会儿后收起。
     private async void SayTouch(string? reaction)
     {
+        // 主语音（尤其是项目报告的实时语音）正在合成/播放时，触碰只做身体反应，不抢语音和台词气泡。
+        if (speech.IsSaying || voice != null || Tts.Busy) return;
         if (reaction?.StartsWith("娇羞") == true) reaction = "娇羞"; // 满档戳裙子的三种反应共用 touch.txt 里「娇羞」的台词
         if (reaction == null || !touchLines.TryGetValue(reaction, out var all)) return;
         var lines = all.Where(line => line.Level <= affection.Level).ToArray();
@@ -1129,8 +1141,9 @@ internal sealed partial class PetWindow : Window
             said = lines[^1].Text;
             foreach (var line in lines) { pick -= 1 + 2 * line.Level; if (pick < 0) { said = line.Text; break; } }
         }
+        var voiceSeconds = Speak(said);
         mutterSpeech.Say(new Line(said, body.Apply));
-        var wait = Math.Clamp(said.Length * 250 + 1200, 2500, 6000) / 1000.0;
+        var wait = Math.Max(Math.Clamp(said.Length * 250 + 1200, 2500, 6000) / 1000.0, (voiceSeconds ?? 0) + 0.4);
         await Task.Delay(TimeSpan.FromSeconds(wait));
         if (token != mutterToken || speech.IsSaying) return;
         mutterSpeech.Stop();
@@ -1205,12 +1218,12 @@ internal sealed partial class PetWindow : Window
         finally { turn.SetResult(); }
     }
 
-    private void SayLine(string text, double charactersPerSecond = Line.CharactersPerSecond)
+    private void SayLine(string text, double? voiceSeconds, double charactersPerSecond = Line.CharactersPerSecond)
     {
         YieldMutter();
         relaxAt = null;
         panelHold = false; // 她自己开口了：控制台点出来的样子不再强留
-        var line = new Line(text, body.Apply, charactersPerSecond);
+        var line = new Line(text, body.Apply, voiceSeconds, charactersPerSecond);
         if (line.Plain.Trim().Length == 0) { PlaySilently(text); return; }
         StartFilming(line.Plain);
         speech.Say(line);
@@ -1242,10 +1255,52 @@ internal sealed partial class PetWindow : Window
         relaxAt = null;
     }
 
-    // 她的嘴跟着字动（没有录音了，只看在不在说话）。
+    // 这句台词有录音就放出来（返回录音长度），没有就返回 null、照旧只打字冒泡。
+    private double? Speak(string text)
+    {
+        if (!settings.VoiceEnabled) return null; // 语音总开关关着：预录也不出声
+        var file = voicePack?.Find(text);
+        if (file == null) return null;
+        try { return PlayVoice(file); }
+        catch { return null; }
+    }
+
+    // Returns how long the recording is, for spreading what she does over it.
+    private double? PlayVoice(string? file)
+    {
+        if (!settings.VoiceEnabled) return null; // 语音总开关关着：audio 和预录都不放
+        if (string.IsNullOrWhiteSpace(file) || !Path.IsPathRooted(file) || !file.EndsWith(".wav", StringComparison.OrdinalIgnoreCase) || !File.Exists(file))
+            throw new ArgumentException("audio 要是本机 wav 文件的完整路径，而且文件要在。");
+        voicePlayer.Stop();
+        voicePlayer.Close(); // 放完/换一条时松开文件，不然录音文件一直被占着没法替换
+        voicePlayer.Open(new Uri(file));
+        voicePlayer.Volume = settings.Volume * VoiceGain; // Close() 会把音量打回默认值，每次打开后要重设
+        voicePlayer.Play();
+        try { voice = Behavior.VoiceLevels(File.ReadAllBytes(file), VoiceStepMilliseconds); }
+        catch (IOException) { voice = null; }
+        // A voice that never starts playing must not hold her mouth for ever.
+        if (voice != null) voiceUntil = DateTime.UtcNow.AddMilliseconds(voice.Length * VoiceStepMilliseconds + 2000);
+        return voice?.Length * VoiceStepMilliseconds / 1000.0;
+    }
+
+    // 语音总开关关掉时，把正在放的录音也停掉。
+    private void StopVoice()
+    {
+        try { voicePlayer.Stop(); voicePlayer.Close(); } catch { /* 已经关了 */ }
+        voice = null;
+    }
+
+    // Her recorded voice when there is one; otherwise her mouth moves while the words come out.
     private void UpdateMouth(Player current)
     {
-        double level = speech.IsTalking || mutterSpeech.IsTalking ? .2 + .35 * Math.Abs(Math.Sin(Environment.TickCount64 / 70.0)) : 0;
+        double level = 0;
+        if (voice is { } levels)
+        {
+            int step = (int)(voicePlayer.Position.TotalMilliseconds / VoiceStepMilliseconds);
+            if (step < levels.Length && DateTime.UtcNow < voiceUntil) level = levels[step];
+            else { voice = null; try { voicePlayer.Close(); } catch { /* 已经关了 */ } }
+        }
+        if (voice == null && (speech.IsTalking || mutterSpeech.IsTalking)) level = .2 + .35 * Math.Abs(Math.Sin(Environment.TickCount64 / 70.0));
         if (level == mouth) return;
         mouth = level;
         current.Send(FormattableString.Invariant($"mouth {level:0.00}"));
@@ -1415,11 +1470,40 @@ internal sealed partial class PetWindow : Window
                 Wake(); // 收着时一开口就出场
                 YieldMutter(); // 说话优先：收起正在显示的嘀咕，等待排队的这段时间里也不再嘀咕
                 var text = Tools.RequiredText(args, "text");
-                var bubbles = Line.Split(text);
-                // A line each, in turn; the call returns once the first has begun, the rest wait their turn whoever asked.
-                await InTurn(() => { SayLine(bubbles[0]); return Task.CompletedTask; }, token);
-                foreach (var next in bubbles.Skip(1))
-                    _ = InTurn(() => { if (!exiting) SayLine(next); return Task.CompletedTask; }, CancellationToken.None);
+                var audio = Tools.OptionalText(args, "audio");
+                // 字幕说中文、声音说日语（本机加，2026-11-09）：speech 是要念的日文，现场合成；text 只当字幕。
+                var spoken = Tools.OptionalText(args, "speech");
+                if (audio == null && spoken != null)
+                {
+                    var live = await Tts.Speak(spoken, settings, token);
+                    var single = text.Replace('\n', ' ').Trim();
+                    await InTurn(() => { SayLine(single, live != null ? PlayVoice(live) : null); return Task.CompletedTask; }, token);
+                    var heard = Heard([single]);
+                    return Tools.Text(heard.Length == 0 ? new { started = true, bubbles = 1, said = Body.Strip(text) }
+                        : (object)new { started = true, bubbles = 1, said = Body.Strip(text), note = heard });
+                }
+                // 实时语音（本机加，2026-11-09）：一句一句来。第一句先说，边听边合成后面的；
+                // 有预录就用预录，没有才现场合成，服务没开就只打字。
+                var bubbles = audio != null ? [text] : Line.Split(text);
+                async Task<string?> VoiceFor(string piece)
+                {
+                    if (audio != null) return audio;
+                    var preset = voicePack?.Find(Tts.Plain(piece));
+                    if (preset != null) return preset;
+                    return await Tts.Speak(piece, settings, CancellationToken.None);
+                }
+                var firstVoice = await VoiceFor(bubbles[0]);
+                var later = bubbles.Skip(1).Select(piece => VoiceFor(piece)).ToArray(); // 先把后面的排上队
+                // A line each, in turn; the call returns once the first has begun, the rest wait their turn whoever
+                // asked. A recording is one utterance, so with one it is a single bubble.
+                await InTurn(() => { SayLine(bubbles[0], firstVoice != null ? PlayVoice(firstVoice) : null); return Task.CompletedTask; }, token);
+                foreach (var (next, voice) in bubbles.Skip(1).Select((piece, i) => (piece, later[i])))
+                    _ = InTurn(async () =>
+                    {
+                        if (exiting) return;
+                        var file = await voice;
+                        if (!exiting) SayLine(next, file != null ? PlayVoice(file) : null);
+                    }, CancellationToken.None);
                 var note = Heard(bubbles);
                 return Tools.Text(note.Length == 0 ? new { started = true, bubbles = bubbles.Count, said = Body.Strip(text) }
                     : (object)new { started = true, bubbles = bubbles.Count, said = Body.Strip(text), note });
@@ -1475,6 +1559,58 @@ internal sealed partial class PetWindow : Window
                 {
                     settings.BubbleSeconds = Settings.StayFor(stays); speech.Seconds = settings.BubbleSeconds;
                 }
+                if (args.TryGetProperty("voice_enabled", out var voiceOn) && voiceOn.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                {
+                    settings.VoiceEnabled = voiceOn.GetBoolean();
+                    if (!settings.VoiceEnabled)
+                    {
+                        // 语音总开关：所有声音静音，同时把实时语音/开机自动启动一起关掉，并把后台 GPT-SoVITS 停掉。
+                        settings.TtsEnabled = false;
+                        settings.TtsAutostart = false;
+                        StopVoice();
+                        Tts.Stop(settings);
+                    }
+                    else
+                    {
+                        // 打开总开关：恢复实时语音和自动启动，并让后台 GPT-SoVITS 起来（有服务目录时）。
+                        settings.TtsEnabled = true;
+                        settings.TtsAutostart = true;
+                        voicePlayer.Volume = settings.Volume * VoiceGain;
+                        _ = Tts.Warm(settings); // 先启动服务并预热一句，之后实时语音才能马上生成
+                    }
+                }
+                if (args.TryGetProperty("volume", out var volume) && volume.TryGetDouble(out var level))
+                {
+                    settings.Volume = Math.Clamp(level, 0, 1);
+                    voicePlayer.Volume = settings.Volume * VoiceGain;
+                }
+                if (args.TryGetProperty("tts_enabled", out var ttsOn) && ttsOn.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                {
+                    var wasOn = settings.TtsEnabled;
+                    settings.TtsEnabled = ttsOn.GetBoolean();
+                    // 关掉实时语音就顺手停掉语音服务，省内存/显存；再打开时提前把它热起来（2026-11-10 用户要的）
+                    if (wasOn && !settings.TtsEnabled) Tts.Stop(settings);
+                    else if (!wasOn && settings.TtsEnabled) _ = Tts.Ensure(settings, CancellationToken.None);
+                }
+                if (args.TryGetProperty("tts_autostart", out var ttsAuto) && ttsAuto.ValueKind is JsonValueKind.True or JsonValueKind.False) settings.TtsAutostart = ttsAuto.GetBoolean();
+        if (args.TryGetProperty("tts_dir", out var ttsDir) && ttsDir.ValueKind == JsonValueKind.String) settings.TtsDir = (ttsDir.GetString() ?? "").Trim();
+        if (args.TryGetProperty("tts_url", out var ttsUrl) && ttsUrl.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(ttsUrl.GetString()))
+                    settings.TtsUrl = ttsUrl.GetString()!.Trim();
+                if (args.TryGetProperty("tts_speed", out var ttsSpeed) && ttsSpeed.TryGetDouble(out var speed))
+                    settings.TtsSpeed = Math.Clamp(speed, .7, 1.5);
+                // 固定台词语音包（本机加，2026-11-10）：second = voice\，calm = voice_calm\；切完立刻换索引和触碰台词。
+                if (args.TryGetProperty("voice_pack", out var voicePackArg) && voicePackArg.ValueKind == JsonValueKind.String)
+                {
+                    var id = string.Equals(voicePackArg.GetString(), "calm", StringComparison.OrdinalIgnoreCase) ? "calm" : "second";
+                    if (id != settings.VoicePack)
+                    {
+                        settings.VoicePack = id;
+                        voice = null;
+                        try { voicePlayer.Close(); } catch { /* 已经关了 */ }
+                        LoadVoicePack();
+                        LoadTouchFile();
+                    }
+                }
                 // Taken up at once: hidden behind a fullscreen program she comes back if it is turned off.
                 if (args.TryGetProperty("hide_on_fullscreen", out var hide) && hide.ValueKind is JsonValueKind.True or JsonValueKind.False)
                 {
@@ -1497,19 +1633,18 @@ internal sealed partial class PetWindow : Window
                 }
                 if (args.TryGetProperty("coax_sleep", out var sleep) && sleep.ValueKind is JsonValueKind.True or JsonValueKind.False) settings.CoaxSleep = sleep.GetBoolean();
                 if (args.TryGetProperty("coax_lunch", out var lunch) && lunch.ValueKind is JsonValueKind.True or JsonValueKind.False) settings.CoaxLunch = lunch.GetBoolean();
-                if (args.TryGetProperty("idle_seconds", out var idle) && idle.TryGetInt32(out var seconds)) settings.IdleSeconds = Math.Clamp(seconds, 15, 600);
-                // 跟着音乐跳：这两个原本只在工具说明里写着、这里没接，改了不生效（本机修，2026-11-12）
-                if (args.TryGetProperty("music_dance", out var dance) && dance.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                // 听到音乐就跳（本机加，2026-11-10）：关掉时顺手把耳朵也收起来，别白跑一个 PowerShell。
+                if (args.TryGetProperty("music_apps", out var apps) && apps.ValueKind == JsonValueKind.String) settings.MusicApps = (apps.GetString() ?? "").Trim();
+        if (args.TryGetProperty("music_dance", out var dance) && dance.ValueKind is JsonValueKind.True or JsonValueKind.False)
                 {
-                    bool on = dance.GetBoolean();
-                    if (on != settings.MusicDance)
-                    {
-                        settings.MusicDance = on;
-                        if (on) StartMusic(); else StopMusic();
-                    }
+                    settings.MusicDance = dance.GetBoolean();
+                    if (!settings.MusicDance) StopMusic();
+                    else if (music == null) StartMusic();
                 }
-                if (args.TryGetProperty("music_apps", out var apps) && apps.ValueKind == JsonValueKind.String)
-                    settings.MusicApps = (apps.GetString() ?? "").Trim();
+                // 桌面实况（本机加，2026-11-12）：总开关，DSH 那边的 dafeiyu-context 插件每十几秒读一次。
+                if (args.TryGetProperty("context_chat", out var contextChat) && contextChat.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                    settings.ContextChat = contextChat.GetBoolean();
+                if (args.TryGetProperty("idle_seconds", out var idle) && idle.TryGetInt32(out var seconds)) settings.IdleSeconds = Math.Clamp(seconds, 15, 600);
                 bool texChanged = false;
                 if (args.TryGetProperty("tex_scale", out var texScale) && texScale.TryGetDouble(out var tex))
                 {
@@ -1570,7 +1705,7 @@ internal sealed partial class PetWindow : Window
             focus.Now == FocusTimer.Phase.Work && !def.Priority && !FocusEvent(name) ? "在专注，不打扰" :
             events.Cooling(def, now) ? "冷却中" :
             // 在说话、放语音、哄睡演出、被面板摆着姿势：谁都让位
-            exiting || speech.IsSaying || silent != null || coaxAutoReturn || (panelHold && body.Posing) ? "她在说话或被摆着姿势" :
+            exiting || speech.IsSaying || voice != null || silent != null || coaxAutoReturn || (panelHold && body.Posing) ? "她在说话或被摆着姿势" :
             // 平常的事件只在她闲着时演；“优先”的可以打断闲时的嘀咕、小剧场、被碰的反应
             !def.Priority && (MutterBlocked || textIdleActive || behavior.Showing != null) ? "她在忙别的" : null;
         if (why != null) return Tools.Text(new { played = false, reason = why });
@@ -1587,8 +1722,9 @@ internal sealed partial class PetWindow : Window
         int token = ++mutterToken;
         textIdleActive = true;
         if (line.Cue != null) body.Apply(line.Cue);
+        var voiceSeconds = line.Text.Length > 0 ? Speak(line.Text) : null;
         if (line.Text.Length > 0) mutterSpeech.Say(new Line(line.Text, body.Apply));
-        await Task.Delay(TimeSpan.FromSeconds(Math.Max(line.Seconds, line.Text.Length * 0.12 + 0.4)));
+        await Task.Delay(TimeSpan.FromSeconds(Math.Max(line.Seconds, (voiceSeconds ?? 0) + 0.4)));
         if (token != mutterToken || exiting) return; // 中途被说话打断了，收尾已经做过
         textIdleActive = false;
         mutterSpeech.Stop();
@@ -1682,11 +1818,17 @@ internal sealed partial class PetWindow : Window
 
     private object State() => new
     {
-        shape = settings.Shape, shapeLabel = Shape.Label, wearing = Wearing(), fps = settings.Fps, scale = settings.Scale, tex_scale = settings.TexScale, bubble_scale = settings.BubbleScale, bubble_seconds = settings.BubbleSeconds,
-        hide_on_fullscreen = settings.HideOnFullscreen, hidden_for_fullscreen = hiddenForFullscreen && !standby, hidden = standby, start_hidden = settings.StartHidden, keep_on_screen = settings.KeepOnScreen, follow_mouse = settings.FollowMouse,
-        check_updates = settings.CheckUpdates, music_dance = settings.MusicDance, coax_sleep = settings.CoaxSleep, coax_lunch = settings.CoaxLunch, birthday = settings.Birthday,
+        shape = settings.Shape, shapeLabel = Shape.Label, wearing = Wearing(), fps = settings.Fps, scale = settings.Scale, tex_scale = settings.TexScale, bubble_scale = settings.BubbleScale, bubble_seconds = settings.BubbleSeconds, volume = settings.Volume,
+        voice_enabled = settings.VoiceEnabled,
+        voice_pack = settings.VoicePack, voice_count = voicePack?.Count ?? 0,
+        tts_enabled = settings.TtsEnabled, tts_url = settings.TtsUrl, tts_speed = settings.TtsSpeed, tts_autostart = settings.TtsAutostart, tts_dir = settings.TtsDir,
+        hide_on_fullscreen = settings.HideOnFullscreen, hidden_for_fullscreen = hiddenForFullscreen && !standby, hidden = standby, hiding, start_hidden = settings.StartHidden, keep_on_screen = settings.KeepOnScreen, follow_mouse = settings.FollowMouse,
+        check_updates = settings.CheckUpdates, coax_sleep = settings.CoaxSleep, coax_lunch = settings.CoaxLunch, birthday = settings.Birthday,
         update = updates.Latest is { } found ? new { current = found.Current, latest = found.Latest, behind = found.Behind, changes = found.Changes, guide = found.Guide } : null,
         idle_seconds = settings.IdleSeconds, position = new { Left, Top }, saying = speech.IsSaying, reaction = behavior.Showing, trouble,
+        // 跟着音乐跳（本机加，2026-11-10）：开关和这会儿跳没跳。
+        music_dance = settings.MusicDance, music_apps = settings.MusicApps, dancing = Dancing,
+        context_chat = settings.ContextChat, // 桌面实况总开关（本机加，2026-11-12）：DSH 的插件读它决定要不要看她前台、要不要搭话
         clothes = Outfit.Clothes.Select(item => item.Label).ToArray(), accessories = Outfit.Accessories.Select(item => item.Label).ToArray(),
         overlays = body.Overlays.Except(poseOverlays).ToArray(), raw = panelRaw.ToArray(), hand = body.HandUp, // 托盘控制台用：脸上开着哪些表情、原版表情、手举着没有
         affection = AffectionState(), focus = FocusState(), memory = MemoryState(), // 亲密度、番茄钟、记忆条数（本机加，2026-11-08）
@@ -1721,11 +1863,6 @@ internal sealed partial class PetWindow : Window
     private static readonly nint HwndTopmost = -1;
     private const uint SwpNoMove = 0x0001, SwpNoSize = 0x0002, SwpNoActivate = 0x0010, SwpNoOwnerZOrder = 0x0200;
     [DllImport("user32.dll")] private static extern nint GetWindow(nint hwnd, uint command);
-    [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint hwnd);
-    [DllImport("user32.dll")] private static extern bool IsIconic(nint hwnd);
-    [DllImport("user32.dll")] private static extern bool GetWindowRect(nint hwnd, out CoverRect rect);
-    [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(nint hwnd, int attribute, out int value, int size);
-    [StructLayout(LayoutKind.Sequential)] private struct CoverRect { public int Left, Top, Right, Bottom; }
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint hwnd, out uint process);
     // 摸头的手要更高帧（本机加，2026-11-11）：把计时精度提到 1ms，关闭时恢复
     [DllImport("winmm.dll")] private static extern uint timeBeginPeriod(uint period);

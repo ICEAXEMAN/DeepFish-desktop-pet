@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -191,9 +191,10 @@ internal sealed partial class PetWindow
                 ChimeFiles[rising] = file;
             }
             chimePlayer.Open(new Uri(file));
-            chimePlayer.Volume = 0.3; // 固定音量，不跟语音设置走（语音功能已去掉，2026-11-11）
+            chimePlayer.Volume = settings.Volume * VoiceGain * 0.75; // 跟着控制台的音量走（比说话轻一点，也乘总衰减）
             chimePlayer.Play();
         }
         catch (Exception error) { Places.Log("提示音放不出来：" + error.Message); }
     }
 }
+

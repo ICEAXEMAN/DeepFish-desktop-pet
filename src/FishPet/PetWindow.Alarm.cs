@@ -66,7 +66,7 @@ internal sealed partial class PetWindow
             await Task.Delay(EnterFadeMs + 180); // 等她在正中站稳了再开口
             var bubbles = text.Split('／', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             foreach (var bubble in bubbles)
-                _ = InTurn(() => { if (!exiting) SayLine(bubble); return Task.CompletedTask; }, CancellationToken.None);
+                _ = InTurn(() => { if (!exiting) SayLine(bubble, null); return Task.CompletedTask; }, CancellationToken.None);
         }
         finally { alarmBusy = false; }
     }

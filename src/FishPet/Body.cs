@@ -72,9 +72,6 @@ internal sealed partial class Body
         ["斜眼"] = (_, s, _) => new("eyes", [("REyeSquint", .9 * s), ("LEyeSquint", .9 * s), ("EyeOpen", .7)]),
         ["眨单眼"] = (_, _, _) => new("eyes", [("ParamEyeLOpen", 0), ("EyeSmile", 1)]),
         ["单眨眼"] = (_, _, _) => new(Move: [("ParamEyeLOpen", "0:0 .2:-1 2.2:-1 2.35:0")]),
-        // 笑眼状态下的单眨眼：眼睛先摆成笑眼，再让一只眼皮 0.8 秒闭一下、同时向左歪一下头（本机加，2026-11-11）
-        ["快眨单眼"] = (_, _, _) => new(Channel: "eyes", Hold: [("EyeOpen", .45), ("EyeSmile", 1)],
-            Move: [("ParamEyeLOpen", "0:0 .14:-1 .6:-1 .8:0"), ("FaceAngleZ", "0:0 .14:12 .6:12 .8:0")]),
         ["挑眉"] = (_, s, _) => new("brows", [("ParamBrowLY", .6 * s), ("ParamBrowRY", .6 * s), ("BrowInnerUp", .4 * s)]),
         ["皱眉"] = (_, s, _) => new("brows", [("ParamBrowLY", -.8 * s), ("ParamBrowRY", -.8 * s), ("ParamBrowLAngle", -s), ("ParamBrowRAngle", -s)]),
         ["八字眉"] = (_, s, _) => new("brows", [("BrowInnerUp", s), ("ParamBrowLAngle", .6 * s), ("ParamBrowRAngle", .6 * s)]),
@@ -103,8 +100,6 @@ internal sealed partial class Body
             ("BrowInnerUp", Scale("0:0 .1:.5 .45:.5 .7:0", s))]),
         ["歪一下头"] = (a, s, _) => new(Move: [("FaceAngleZ", Scale("0:0 .2:12 .6:12 .9:0", s * Side(a)))]),
         ["晃头"] = (_, s, _) => new(Move: [("FaceAngleZ", Scale("0:0 .3:-10 .7:10 1.1:-8 1.5:6 2:0", s))]),
-        // 慢慢地左右歪头：左→右→左→回正，最后慢慢停下（本机加，2026-11-11，给摸头彩蛋第 1 句用）
-        ["慢歪头"] = (_, s, _) => new(Move: [("FaceAngleZ", Scale("0:0 1:8 2.2:-8 3.4:6 4.6:0", s))]),
         ["缩一下"] = (_, s, _) => new(Move: [("ViewSquash", Scale("0:0 .08:.05 .3:.01 .6:0", s)), ("FaceAngleY", Scale("0:0 .08:-8 .6:0", s))]),
         ["叹气"] = (_, _, _) => new(Move: [("LeanInput", "0:0 .8:5 1.8:-7 2.8:-6 3.5:0"), ("FaceAngleY", "0:0 .8:7 1.8:-9 2.8:-8 3.5:0"),
             ("ViewSquash", "0:0 .8:-.02 1.2:-.02 1.9:.03 2.8:.025 3.5:0"), ("EyeOpen", "0:0 .8:-.2 1.8:-.6 2.8:-.55 3.5:0"),
@@ -242,6 +237,10 @@ internal sealed partial class Body
     private readonly Action<string> send;
     private readonly Dictionary<string, (string Id, double Value)[]> channels = [];
     // 跳舞时的表情单独放：不算「摆着姿势」，否则跳舞一换脸就判定成被摆姿势、舞蹈自己把自己停下（本机修，2026-11-12）
+    // 哪些脸上的表情会把两只眼睛整个换掉。这几个同时只能开一个：换一个就把前一个关掉
+    // （用户 2026-11-13 报的：两个眼睛表情叠着开，脸上只看得到先开的那个，再点后面那个就像没反应）。
+    private static readonly string[] EyeOverlays = ["＞＜", "爱心眼", "圈圈眼", "屑屑眼"];
+
     private (string Id, double Value)[]? danceFace;
     private readonly HashSet<string> overlays = [];
     private Dictionary<string, double> shown = [];
@@ -301,7 +300,7 @@ internal sealed partial class Body
     }
 
     // Moves that are reflexes keep their own speed whatever she is saying.
-    private static readonly HashSet<string> Reflexes = ["吓一跳", "眨眼", "缩一下", "快眨单眼"];
+    private static readonly HashSet<string> Reflexes = ["吓一跳", "眨眼", "缩一下"];
     private const double Beat = .35, HandBeat = .7, StartleBeat = .45;
 
     // Plays one cue and says how long her words wait before going on. Her moves go with her words (tuned by eye,
@@ -356,7 +355,14 @@ internal sealed partial class Body
             if (word.Reset) Relax();
             foreach (var place in word.Clear ?? []) channels.Remove(place);
             if (word.Channel is { } channel) channels[channel] = word.Hold!;
-            if (word.Overlay is { } overlay && overlays.Add(overlay)) send($"exp {overlay} 1");
+            if (word.Overlay is { } overlay)
+            {
+                // 眼睛类表情互斥：先关掉另一个，再开这个（用户 2026-11-13）
+                if (EyeOverlays.Contains(overlay))
+                    foreach (var other in EyeOverlays)
+                        if (other != overlay && overlays.Remove(other)) send($"exp {other} 0");
+                if (overlays.Add(overlay)) send($"exp {overlay} 1");
+            }
             if (word.HandDown) PutHandDown();
             if (word.Hand is { } up && hand != up) { PutHandDown(); hand = up; send($"motion {up.On}"); }
             foreach (var (id, keys) in move ?? []) send($"anim {id} {keys}");
@@ -453,7 +459,8 @@ internal sealed partial class Body
 }
 
 // One thing she says, acted out: the words come at a speaking pace, and each 〔〕 holds them until her body has
-// shown it, so what she says and does stay together.
+// shown it, so what she says and does stay together. With her recorded voice the words spread over its length
+// instead and nothing waits: a recording cannot pause.
 internal sealed class Line
 {
     internal const double CharactersPerSecond = 9;
@@ -484,9 +491,11 @@ internal sealed class Line
         return lines;
     }
 
-    internal Line(string text, Func<string, double, char, double> act, double charactersPerSecond = CharactersPerSecond)
+    private readonly bool recorded;
+    internal Line(string text, Func<string, double, char, double> act, double? voiceSeconds = null, double charactersPerSecond = CharactersPerSecond)
     {
         this.act = act;
+        recorded = voiceSeconds is > 0;
         var plain = new System.Text.StringBuilder();
         foreach (var (cue, words) in Body.Parts(text))
         {
@@ -501,7 +510,10 @@ internal sealed class Line
             }
         }
         Plain = plain.ToString();
-        Spoken = steps.Sum(step => step.Seconds);
+        double total = steps.Sum(step => step.Seconds);
+        if (recorded && total > 0)
+            for (int i = 0; i < steps.Count; i++) steps[i] = steps[i] with { Seconds = steps[i].Seconds * voiceSeconds!.Value / total };
+        Spoken = recorded ? voiceSeconds!.Value : total;
     }
 
     // The words between a cue and the next: how long they take to say, and whether they are said with a "！" or trail off.
@@ -538,7 +550,7 @@ internal sealed class Line
             {
                 var (spoken, tone) = After(index);
                 double wait = act(cue, spoken, tone);
-                at += wait;
+                if (!recorded) at += wait;
                 index++;
                 continue;
             }

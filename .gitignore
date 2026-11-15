@@ -19,16 +19,18 @@ errors.log
 api.json
 *.old
 *.tmp
-*.bad
 
-# 每个人自己的大肥鱼：羁绊、记忆小本本（都只存在本机，绝不上传）
+# 每个人自己的大肥鱼：亲密度、记忆小本本（都只存在本机，绝不上传）
 affection.json
+context_chat.json
 memory.json
 memory-archive.json
 
 # 托盘控制台自己记的
 tray/config.json
 tray/ui.json
+tray/icon-paths.json
+tray/context-ui.json
 
 # hook 的本机记录
 hooks/**/hook.log
@@ -39,15 +41,26 @@ hooks/**/sessions.json
 .cursor/
 .claude/
 
+# 语音包：本机生成的 389 条录音，体积大，不进仓库
+voice/
+
 # 本机的记忆视图和变更记录、开发用录制和草稿（里面有用户自己的事或本机路径）
 memory.md
 memory-log.jsonl
 record/
 dev/
 
-# 语音包和语音生成工具只留在本机，不上传（2026-11-11）
-voice/
-voice/ref/
-tools/
-启动语音服务.bat
+# 第二套语音包、本机停用项和本机检查记录，不进仓库
+voice_g3/
+_停用启动项/
+保存清单_*.txt
+插件部署检查.txt
+# 备份/中间产物（2026-11-13 整理时加的）
+renderer/build-cache-bak-*/
+__pycache__/
 tray/tray.log
+*.old
+
+# 渲染器的编译中间产物（只留 Release 里的成品）
+renderer/build/*
+!renderer/build/Release/

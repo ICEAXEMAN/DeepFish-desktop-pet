@@ -14,6 +14,10 @@
 #     做法：发消息那一刻拉起一个后台小进程（--think）睡 30 秒再看一眼；这一轮已经做完或你又发了新消息，它就悄悄走。
 # 定时任务（哄睡、午饭提醒）自己开的会话：发出的事件都带 auto，桌宠不把它当成你本人在（不记动静、不加亲密度）。
 # 会话状态（这一轮几点开始、是不是定时任务开的）记在同目录 sessions.json，一天前的自动清掉。
+# 桌面实况（本机加，2026-11-12）：让 Claude 也知道你在用什么软件、什么网页：
+#   · 会话开始、你发消息时，如果「识别当前窗口并说话」的观察器没在跑（DSH 没开），就把它拉起来（node index.js --claude，只看窗口、不说话）；
+#   · 你每次发消息，把观察器写在 status.json 里的「桌面实况」那一段作为额外上下文带给 Claude（定时任务开的会话不带）。
+#   托盘控制台里「她现在看到的是」读的也是这份 status.json，所以两边是同一个状态。托盘里关掉总开关，这里就什么都不带。
 # 她收着、在说话、冷却没到时桌宠自己会不演（也不会叫她出场），这里不用管。
 #
 # 配置在 ~/.claude/settings.json 的 hooks 里；调试：同目录 hook.log 记着最近收到的事件和桌宠的回答。
@@ -33,6 +37,7 @@ if not sys.flags.utf8_mode and not os.environ.get("FISH_HOOK_UTF8"):
     except Exception:
         pass
 import re
+import shutil
 import time
 import urllib.request
 from pathlib import Path
@@ -65,6 +70,77 @@ THINK_TIMEOUT = 30  # 秒：发消息后这么久没有任何动静，算“思�
 BUILD = re.compile(r"\b(dotnet\s+(build|publish|msbuild)|msbuild|npm\s+run\s+build|yarn\s+build|pnpm\s+build|cargo\s+build|go\s+build|make\b|cmake\s+--build|gradle|mvn|tsc\b|vite\s+build|setup\.ps1)", re.I)
 TEST = re.compile(r"(\bdotnet\s+test\b|\.Tests\b|\bpytest\b|python\S*\s+-m\s+(pytest|unittest)|\bnpm\s+(run\s+)?test\b|\byarn\s+test\b|\bpnpm\s+test\b|\bjest\b|\bvitest\b|\bcargo\s+test\b|\bgo\s+test\b|\bmvn\s+test\b|\bgradle\w*\s+test\b)", re.I)
 FAILED = re.compile(r"(\b[1-9]\d*\s+(failed|failing|errors?)\b|\bFAILED\b|\bFailed!|失败\s*[:：]?\s*[1-9]|Build FAILED|\berror\s+[A-Z]{2,}\d+)")
+
+
+# ---- 桌面实况：让 Claude 也能用「她现在看到的是」 ----
+
+STATUS_FRESH = 20  # 秒：status.json 超过这么久没刷新，就当观察器没在跑
+
+
+def context_plugin_dir():
+    # 插件（dafeiyu-context）在哪：桌宠目录里的 context_chat.json 是它启动时写的名片；没有就找 DSH 的默认位置
+    try:
+        pointer = json.loads((API.parent / "context_chat.json").read_text(encoding="utf-8-sig"))
+        folder = Path(pointer["dir"])
+        if (folder / "index.js").exists():
+            return folder
+    except Exception:
+        pass
+    fallback = Path.home() / ".dsh" / "plugins" / "dafeiyu-context"
+    return fallback if (fallback / "index.js").exists() else None
+
+
+def read_status(folder):
+    # 状态没过期才返回（过期了就是观察器没在跑，里面的内容是旧的）
+    try:
+        status = json.loads((folder / "status.json").read_text(encoding="utf-8-sig"))
+        stamp = time.mktime(time.strptime(str(status["at"])[:19], "%Y-%m-%dT%H:%M:%S")) - time.timezone  # 插件写的是 UTC
+        return status if time.time() - stamp < STATUS_FRESH else None
+    except Exception:
+        return None
+
+
+def ensure_watcher(folder):
+    # 先报个平安（独立运行的观察器十分钟没听到动静就自己退出），再看观察器在不在，不在就拉起来
+    try:
+        (folder / "claude-alive.json").write_text(json.dumps({"at": int(time.time() * 1000)}), encoding="utf-8")
+    except Exception:
+        return
+    if read_status(folder) is not None:
+        return
+    lock = folder / "claude-spawn.json"
+    try:
+        if time.time() - float(json.loads(lock.read_text(encoding="utf-8")).get("at", 0)) < 25:
+            return  # 刚拉起来过，还在启动，别重复拉
+    except Exception:
+        pass
+    node = shutil.which("node")
+    if not node:
+        log("桌面实况：找不到 node，没法拉起观察器")
+        return
+    try:
+        lock.write_text(json.dumps({"at": time.time()}), encoding="utf-8")
+        env = {**os.environ, "DAFEIYU_API_PATH": str(API)}
+        quiet = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL, "env": env, "cwd": str(folder), "close_fds": True}
+        args = [node, str(folder / "index.js"), "--claude"]
+        if os.name == "nt":
+            detached = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+            try:
+                subprocess.Popen(args, creationflags=detached | 0x01000000, **quiet)  # 能挣脱 Claude Code 的作业对象就挣脱
+            except OSError:
+                subprocess.Popen(args, creationflags=detached, **quiet)
+        else:
+            subprocess.Popen(args, start_new_session=True, **quiet)
+        log("桌面实况：观察器没在跑，已拉起（node index.js --claude）")
+    except Exception as error:
+        log(f"桌面实况：没拉起来（{type(error).__name__}）")
+
+
+def desktop_context(folder):
+    # 观察器写好的那一段「【桌面实况】……」；总开关关着、没场景、状态过期时是空的
+    status = read_status(folder)
+    text = str((status or {}).get("context", "")).strip()
+    return text[:600]
 
 
 def load_sessions():
@@ -171,6 +247,21 @@ def main():
     if sid:
         sessions[sid] = session
         save_sessions(sessions)
+    event_name = data.get("hook_event_name", "")
+    # 桌面实况：每个事件都报个平安；会话开始 / 发消息时看看观察器在不在；发消息时把实况带给 Claude
+    try:
+        folder = context_plugin_dir()
+        if folder is not None:
+            if event_name in ("SessionStart", "UserPromptSubmit", "Stop"):
+                ensure_watcher(folder)
+            if event_name == "UserPromptSubmit" and not session.get("auto"):
+                text = desktop_context(folder)
+                if text:
+                    print(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": text}}))
+                    sys.stdout.flush()
+                    log(f"桌面实况：带给 Claude {len(text)} 字")
+    except Exception as error:
+        log(f"桌面实况：出错（{type(error).__name__}）")
     name = pick(data, session)
     if data.get("hook_event_name") == "Stop" and sid and sid in sessions:
         sessions[sid]["done"] = True  # 这一轮做完了：思考计时看到这个就不喊

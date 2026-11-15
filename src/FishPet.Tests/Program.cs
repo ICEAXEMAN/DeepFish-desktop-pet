@@ -12,9 +12,9 @@ VerifyBond();
 VerifyMemory();
 VerifyMemoryView();
 VerifyAlarms();
-VerifyWelcome();
 VerifyDance();
 VerifyBeatTracker();
+VerifyJapanese();
 Console.WriteLine($"FishPet: {checks} checks passed.");
 
 // 待机自言自语：模型现编的「话|动作|道具」怎么解析，数据文件里的动作词她都做得出来，抽选能抽到小剧场。
@@ -355,6 +355,20 @@ void VerifyLive2DBehavior()
     Check(Behavior.IdleWeight("打瞌睡", 2) > Behavior.IdleWeight("打瞌睡", 14)
         && Behavior.IdleWeight("张望", 2) == Behavior.IdleWeight("张望", 14), "sleepy late at night only");
 
+    const int rate = 24000, milliseconds = 100;
+    var samples = new short[rate];
+    for (int i = rate / 2; i < rate; i++) samples[i] = (short)(Math.Sin(i * .1) * 12000);
+    var wav = new List<byte>();
+    void Add(params byte[] bytes) => wav.AddRange(bytes);
+    Add("RIFF"u8.ToArray()); Add(BitConverter.GetBytes(36 + rate * 2)); Add("WAVEfmt "u8.ToArray()); Add(BitConverter.GetBytes(16));
+    Add(BitConverter.GetBytes((short)1)); Add(BitConverter.GetBytes((short)1)); Add(BitConverter.GetBytes(rate)); Add(BitConverter.GetBytes(rate * 2));
+    Add(BitConverter.GetBytes((short)2)); Add(BitConverter.GetBytes((short)16)); Add("data"u8.ToArray()); Add(BitConverter.GetBytes(rate * 2));
+    foreach (var sample in samples) Add(BitConverter.GetBytes(sample));
+    var levels = Behavior.VoiceLevels(wav.ToArray(), milliseconds)!;
+    Check(levels.Length == 10 && levels[1] == 0 && levels[8] > .9, "her mouth follows the loudness of the recording");
+    Check(Behavior.VoiceLevels(new byte[100], milliseconds) == null, "anything but a wav is left alone");
+
+
     // Her own body language (the owner reviewed it, 2026-11-02): words in 〔〕, each a hand-tuned piece, stacked
     // by the rules learned on this model, and her words waiting for what her body does.
     var acting = new List<string>();
@@ -423,7 +437,12 @@ void VerifyLive2DBehavior()
     Check(said.Shown == 3 && !said.Talking, "her mouth rests on the dots");
     said.Advance(5);
     Check(said.Done && said.Shown == said.Plain.Length, "all said");
-    Check(Math.Abs(said.Spoken - (3 / 9.0 + .5)) < 1e-9, "how long the words take");
+    var spoken = new Line("〔点头〕好呀", (_, _, _) => 1, voiceSeconds: 2);
+    spoken.Advance(1.5);
+    Check(spoken.Shown == 2 && !spoken.Done, "with her voice the words spread over the recording and nothing waits");
+    spoken.Advance(2.1);
+    Check(spoken.Done, "and end with it");
+    Check(Math.Abs(said.Spoken - (3 / 9.0 + .5)) < 1e-9 && spoken.Spoken == 2, "how long the words take: the recording when there is one");
     var ending = new Line("好呀〔点头×2〕", (_, _, _) => 1.5);
     ending.Advance(.3);
     Check(ending.Shown == 2 && !ending.Done, "a move at the end has begun once the words are out");
@@ -840,39 +859,6 @@ void VerifyAlarms()
     Check(words.Count > 0, "alarm lines carry actions");
 }
 
-// 第一次出场的欢迎（2026-11-13）：台词从 welcome.txt 取，缺了有内置的；每个动作词她都做得出来；老用户不补说。
-void VerifyWelcome()
-{
-    var root = AppContext.BaseDirectory;
-    while (root != null && !File.Exists(Path.Combine(root, "welcome.txt"))) root = Path.GetDirectoryName(root);
-    Check(root != null, "welcome.txt is found");
-    var shipped = Welcome.Text(File.ReadAllLines(Path.Combine(root!, "welcome.txt")));
-    Check(Welcome.Bubbles(shipped).Length is >= 3 and <= 6, "the welcome is a few bubbles, not a speech");
-    Check(Welcome.Bubbles(Welcome.Fallback).Length is >= 3 and <= 6, "the built-in welcome is a few bubbles too");
-
-    // 文件缺了、没有「# 欢迎」、或者那一段是空的，都退回内置的
-    Check(Welcome.Text(null) == Welcome.Fallback, "no file: the built-in welcome");
-    Check(Welcome.Text(["// 只有注释", "# 别的段", "一句话"]) == Welcome.Fallback, "no welcome section: the built-in welcome");
-    Check(Welcome.Text(["# 欢迎", "／／", "第二条／带气泡"]) == "第二条／带气泡", "an empty line is skipped, the first real one is used");
-    Check(Welcome.Text(["# 欢迎", "甲／乙", "丙"]) == "甲／乙", "only the first line of the section is used");
-
-    // 每个动作词她的身体都做得出来（用的是同一套 Body），而且托盘、气泡、收起这几件事都交代到了
-    foreach (var text in new[] { shipped, Welcome.Fallback })
-    {
-        var acting = new List<string>();
-        var body = new Body(acting.Add);
-        foreach (var bubble in Welcome.Bubbles(text))
-            foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(bubble, "〔([^〕]*)〕"))
-                body.Apply(match.Groups[1].Value);
-        Check(body.Unknown.Count == 0, "every action word in the welcome is one her body can do" + (body.Unknown.Count > 0 ? "（" + string.Join("、", body.Unknown) + "）" : ""));
-    }
-    Check(shipped.Contains("小鲸鱼") && shipped.Contains("收起来") && shipped.Contains("不上传"), "the welcome tells where the tray icon is, how to hide her, and that nothing is uploaded");
-
-    // 新装 / 老用户：没有设置文件才要欢迎；有设置文件（哪怕是读坏的）都不补说
-    Check(Welcome.Pending(settingsFileExisted: false), "no settings.json: a fresh install, she welcomes");
-    Check(!Welcome.Pending(settingsFileExisted: true), "an existing settings.json: an old user, no welcome");
-}
-
 // 跟着音乐跳（本机加，2026-11-10）：BPM 决定一拍多长，舞步跟着变快变慢。
 void VerifyDance()
 {
@@ -1036,4 +1022,55 @@ void VerifyBeatTracker()
         tracker.Reset();
         Check(double.IsNaN(tracker.Position(20)) && !tracker.Locked, "Reset 以后没有相位");
     }
+}
+
+// 实时语音前的日语规整：时间和数字要念得对（「0.3」合成出来会被念成「0 3」，点和小数位都丢）。
+void VerifyJapanese()
+{
+    string N(string text) => Japanese.Normalize(text);
+
+    // 时间：24 点写成「深夜0時」，整点不带分
+    Check(N("24:00") == "深夜0時", "24:00 → 深夜0時");
+    Check(N("24：00") == "深夜0時", "全角冒号也认");
+    Check(N("24:30") == "深夜0時30分", "24:30 → 深夜0時30分");
+    Check(N("12:30") == "12時30分", "12:30 只换写法");
+    Check(N("12:05") == "12時5分", "12:05 去掉补零");
+    Check(N("0:00") == "0時", "0:00 → 0時");
+    Check(N("123:45") == "123:45", "不是时间的比例不动");
+    Check(N("24時00分") == "深夜0時", "已经是汉字的也收一下");
+
+    // 小数：整数位用数词，小数位一位一位念
+    Check(N("0.3") == "零点三", "0.3 → 零点三");
+    Check(N("1.5") == "一点五", "1.5 → 一点五");
+    Check(N("12.5") == "十二点五", "两位数写成十二");
+    Check(N("0.25") == "零点二五", "0.25 → 零点二五");
+    Check(N("105.0") == "百五点零", "105 写成百五");
+    Check(N("12000.5") == "一万二千点五", "一万二千");
+    Check(N("０．３") == "零点三", "全角数字和小数点也认");
+
+    // 版本号、IP、带英文前缀的版本号不动
+    Check(N("1.2.3") == "1.2.3", "版本号不动");
+    Check(N("192.168.1.1") == "192.168.1.1", "IP 不动");
+    Check(N("v2.0") == "v2.0", "v2.0 不动");
+    Check(N("GPT-4.5") == "GPT-四点五", "型号里的小数是数量，照念");
+
+    // 百分号：合成器会直接吞掉，写成「パーセント」才念得出来
+    Check(N("30%") == "30パーセント", "30% → 30パーセント");
+    Check(N("30％") == "30パーセント", "全角百分号也认");
+    Check(N("達成率は30%、確率は0.5%") == "達成率は30パーセント、確率は零点五パーセント", "百分号和小数一起");
+
+    // 标点（2026-11-12 合成 + 识别实测）：括号旁白会被念出来，波浪号、全角斜杠会连读错
+    Check(N("（笑）そうだね。") == "そうだね。", "括号旁白连内容一起去掉");
+    Check(N("待って…（ため息）もう無理。") == "待って…もう無理。", "句中的括号旁白也去掉");
+    Check(N("(test) だけ") == " だけ", "半角括号也认");
+    Check(N("一〜三まで。") == "一から三まで。", "波浪号在数字之间换成から");
+    Check(N("1～3") == "1から3", "半角波浪号也认");
+    Check(N("そう〜なの？") == "そうなの？", "拖长音的波浪号直接去掉");
+    Check(N("A／B のどっち。") == "A、B のどっち。", "斜杠换成顿号");
+    Check(N("「やめて」と言った。") == "やめてと言った。", "引号去掉、内容保留");
+    Check(N("《テスト》です。") == "テストです。", "书名号去掉、内容保留");
+    Check(N("【重要】なこと。") == "重要なこと。", "方头括号去掉、内容保留");
+
+    // 一句话里混着来
+    Check(N("音量は0.3、24:00に終わるよ。") == "音量は零点三、深夜0時に終わるよ。", "混着也各管各的");
 }

@@ -1,11 +1,11 @@
 using System;
-using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace FishPet;
 
-// 第一次真正出场时说欢迎（台词和规则见 Welcome.cs、welcome.txt）。
+// 第一次真正出场时说欢迎（台词和规则见 Welcome.cs、welcome.txt / welcome_calm.txt）。
+// 每句先看语音包里有没有这条录音（W-0x.wav），有就放、气泡跟着录音走；没有就只冒气泡。
 internal sealed partial class PetWindow
 {
     private bool welcoming;
@@ -29,16 +29,21 @@ internal sealed partial class PetWindow
             if (exiting || standby || hiding || hiddenForFullscreen || !ready) return;
             settings.Welcomed = true;
             settings.Save();
-            string[]? fileLines = null;
-            try
+            var text = Welcome.Text(Places.Root, settings.VoicePack);
+            var bubbles = Welcome.Bubbles(text);
+            Places.Log($"第一次出场：说欢迎（{settings.VoicePack}，{Welcome.FileFor(settings.VoicePack)}，{bubbles.Length} 句）");
+            // 一句一句来：先放录音（气泡跟着录音走），这一句演完再歇一口气说下一句。
+            // 查录音要用去掉〔动作〕的正文，index.json 的键就是那个（Voice.Norm 只去空格）——2026-11-13 修。
+            for (int i = 0; i < bubbles.Length && !exiting; i++)
             {
-                var file = Path.Combine(Places.Root, "welcome.txt");
-                if (File.Exists(file)) fileLines = File.ReadAllLines(file);
+                var bubble = bubbles[i];
+                var voiceSeconds = Speak(Tts.Plain(bubble));
+                Places.Log($"欢迎 {i + 1}/{bubbles.Length}：{(voiceSeconds is null ? "没有录音，只打字" : $"录音 {voiceSeconds:0.0} 秒")}");
+                await InTurn(() => { if (!exiting) SayLine(bubble, voiceSeconds); return Task.CompletedTask; }, CancellationToken.None);
+                for (int wait = 0; wait < 120 && speech.IsSaying && !exiting; wait++) await Task.Delay(100);
+                if (exiting) return;
+                await Task.Delay(900); // 气口：别一句贴着一句
             }
-            catch (Exception error) { Places.Log("welcome.txt 读不出来：" + error.Message); }
-            Places.Log("第一次出场：说欢迎");
-            foreach (var bubble in Welcome.Bubbles(Welcome.Text(fileLines)))
-                _ = InTurn(() => { if (!exiting) SayLine(bubble); return Task.CompletedTask; }, CancellationToken.None);
         }
         finally { welcoming = false; }
     }

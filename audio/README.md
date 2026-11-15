@@ -19,7 +19,7 @@
 | 文件 | 是什么 |
 | --- | --- |
 | `probe.ps1` | 采集器：Windows PowerShell 5.1 + `Add-Type` 现场编译一小段 C#，用 NAudio 抓 loopback、做 FFT、分频段 |
-| `NAudio.dll` | NAudio 1.10.0（MIT，Copyright © Mark Heath & Contributors），随包分发。中文路径下 `LoadFrom` 会报 0x80131515，`probe.ps1` 会先复制到 `%TEMP%` 再用 `LoadFile` 加载。 |
+| `NAudio.dll` | NAudio 1.10.0（MIT，Copyright © Mark Heath & Contributors），随包分发 |
 
 ## 哪来的
 

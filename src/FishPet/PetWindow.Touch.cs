@@ -254,7 +254,7 @@ internal sealed partial class PetWindow
             lastStrokeGain = DateTime.UtcNow;
             BondGain("摸头");
         }
-        if (!speech.IsSaying) SayTouch(key);
+        if (!speech.IsSaying && voice == null) SayTouch(key);
     }
 
     // 脸：side 是手靠近头的哪一侧（屏幕上的），face 为 true 表示手在脸上；t 是摸了多久（秒）。

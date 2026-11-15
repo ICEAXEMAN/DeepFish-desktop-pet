@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
@@ -23,7 +23,10 @@ public partial class App : System.Windows.Application
     private readonly DispatcherTimer poll = new() { Interval = TimeSpan.FromSeconds(1) };
     private DateTime startedAt = DateTime.UtcNow;
     private DateTime? petGoneSince;
+    private DateTime lastGood;
     private bool petSeen;
+    private bool ticking;
+    private int misses;
 
     internal static void Log(string text)
     {
@@ -34,6 +37,7 @@ public partial class App : System.Windows.Application
     {
         base.OnStartup(e);
         Pet.Init();
+        Taskbar.Register(); // 两个窗口在任务栏上各占一个按钮：先登记名字和图标（HKCU，重复写没关系）
 
         // 画图标预览：FishTray.exe --preview 目标.png
         var args = e.Args;
@@ -61,9 +65,39 @@ public partial class App : System.Windows.Application
             {
                 wait.Stop();
                 try { panel.Snapshot(target, more, open, scroll, search); } catch (Exception error) { File.WriteAllText(target + ".err.txt", error.ToString()); }
+                panel.AllowClose = true; // 自检模式要真关窗口退出（平时关窗口只是收起面板）
                 Shutdown();
             };
             wait.Start();
+            return;
+        }
+
+        // 截图预览：FishTray.exe --context-shot 目标.png [--scroll 像素]（「识别当前窗口并闲聊」子窗口，开发自检用）
+        int shotCtx = Array.IndexOf(args, "--context-shot");
+        if (shotCtx >= 0 && shotCtx + 1 < args.Length)
+        {
+            var target = args[shotCtx + 1];
+            int scrollAt = Array.IndexOf(args, "--scroll");
+            double scroll = scrollAt >= 0 && scrollAt + 1 < args.Length && double.TryParse(args[scrollAt + 1], out var value) ? value : 0;
+            var window = new ContextChatWindow();
+            window.Open();
+            if (Array.IndexOf(args, "--demo-try") >= 0) window.StartTryNote(); // 只演示倒数条，不真让她说话
+            // --wait 毫秒：等久一点再截（图标是后台找的，等它填完再看）
+            int waitAt = Array.IndexOf(args, "--wait");
+            var waitMs = waitAt >= 0 && waitAt + 1 < args.Length && int.TryParse(args[waitAt + 1], out var waited) ? waited : 2500;
+            var waitCtx = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(waitMs) };
+            waitCtx.Tick += (_, _) =>
+            {
+                waitCtx.Stop();
+                try
+                {
+                    window.Snapshot(target, scroll);
+                    File.WriteAllText(target + ".measure.txt", window.Measure());
+                }
+                catch (Exception error) { File.WriteAllText(target + ".err.txt", error.ToString()); }
+                Shutdown();
+            };
+            waitCtx.Start();
             return;
         }
 
@@ -76,7 +110,7 @@ public partial class App : System.Windows.Application
             var logPath = args[self + 1];
             panel = new MainWindow();
             panel.Open();
-            _ = Dispatcher.InvokeAsync(async () => { await System.Threading.Tasks.Task.Delay(1500); await panel.SelfTest(logPath); Shutdown(); });
+            _ = Dispatcher.InvokeAsync(async () => { await System.Threading.Tasks.Task.Delay(1500); await panel.SelfTest(logPath); panel.AllowClose = true; Shutdown(); });
             return;
         }
         single = new Mutex(true, SingleName, out bool first);
@@ -95,6 +129,11 @@ public partial class App : System.Windows.Application
         waiter.Start();
 
         panel = new MainWindow();
+        // 她收着的时候把面板关掉（右上角的叉、Esc）：提一句“还在托盘里”，免得让人以为整个桌宠退了（用户 2026-11-13）
+        panel.IsVisibleChanged += (_, _) =>
+        {
+            if (panel is { IsVisible: false, Hidden: true }) Balloon("控制台只是收起来了", "点任务栏里的小鲸鱼图标就能再打开。");
+        };
         BuildTray();
         poll.Tick += async (_, _) => { try { await Tick(); } catch (Exception error) { Log("ERR " + error); } };
         poll.Start();
@@ -127,50 +166,72 @@ public partial class App : System.Windows.Application
             toggleItem.Text = hidden == false ? "收起" : "出场";
         };
 
-        tray = new NotifyIcon { Icon = Whale.Icon(32), Text = "大肥鱼", Visible = false, ContextMenuStrip = menu };
+        tray = new NotifyIcon { Icon = Whale.Icon(SystemInformation.SmallIconSize.Width), Text = "大肥鱼", Visible = false, ContextMenuStrip = menu };
         tray.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) OpenPanel(); };
     }
 
     private void OpenPanel()
     {
         if (panel is null) return;
-        if (panel.IsVisible) { panel.Activate(); return; }
+        // 她不在了（Agent 退下了，或者被关掉）：点托盘就把她重新叫起来（用户 2026-11-13）
+        if (panel.Hidden is null) Pet.StartPet();
+        if (panel.IsVisible)
+        {
+            if (panel.WindowState == System.Windows.WindowState.Minimized) panel.WindowState = System.Windows.WindowState.Normal;
+            panel.Activate();
+            return;
+        }
         panel.Open();
     }
 
     private async System.Threading.Tasks.Task Tick()
     {
-        if (panel is null) return;
-        // 用接口判断她在不在（本机修，2026-11-11）：Process.GetProcessesByName("FishPet") 在这台机器上一直返回空，
-        // 会误判“桌宠没运行”，40 秒后把控制台和桌宠一起关掉，托盘图标就消失了。
-        bool running = panel.Hidden is not null;
-        if (running) { petSeen = true; petGoneSince = null; }
-        else
+        if (panel is null || ticking) return; // 上一次还没问完就别再发：接口慢的时候请求会越堆越多
+        ticking = true;
+        try
         {
-            petGoneSince ??= DateTime.UtcNow;
-            // 桌宠退场了（或者一直没起来）：控制台也退，不留个空图标
-            if ((petSeen && DateTime.UtcNow - petGoneSince > TimeSpan.FromSeconds(2)) || (!petSeen && DateTime.UtcNow - startedAt > TimeSpan.FromSeconds(40)))
-            { Quit(); return; }
+            // 用接口判断她在不在（本机修，2026-11-11）：Process.GetProcessesByName("FishPet") 在这台机器上一直返回空，
+            // 会误判“桌宠没运行”，40 秒后把控制台和桌宠一起关掉，托盘图标就消失了。
+            bool running = panel.Hidden is not null;
+            if (running) { petSeen = true; petGoneSince = null; lastGood = DateTime.UtcNow; misses = 0; }
+            else
+            {
+                misses++;
+                petGoneSince ??= DateTime.UtcNow;
+                // 本机修（2026-11-13）：收起、出场那几秒里她偶尔慢一下，不能当成“她走了”。
+                // 以前只等 2 秒就退出控制台；鱼正好在播放退场动画时关掉面板，看上去就是“面板和鱼一起没了”。
+                // 现在要连续几次问不到、而且离最后一次答应过了几秒，才认她真的退场（这时才把控制台也收掉）。
+                bool away = petGoneSince is { } since && DateTime.UtcNow - since > TimeSpan.FromSeconds(6);
+                bool gone = petSeen ? misses >= 4 && away : DateTime.UtcNow - startedAt > TimeSpan.FromSeconds(40);
+                if (!panel.Busy && gone) { Quit(); return; }
+            }
+            await panel.Refresh();
+            if (tray is not null)
+            {
+                bool? hidden = panel.Hidden;
+                tray.Text = hidden is null ? "大肥鱼（连接中）" : hidden == true ? "大肥鱼 · 收起着（点我打开控制台）" : "大肥鱼 · 在桌面上";
+                // 本机改（2026-11-13）：她收着的时候也留着托盘图标——右上角的叉只是把面板收起来，
+                // 要是图标也跟着消失，就再没有入口了，看起来整个桌宠都退出了（用户要的：关掉控制台不等于退出）。
+                bool showIcon = hidden is not null || DateTime.UtcNow - lastGood < TimeSpan.FromSeconds(8) || panel.IsVisible;
+                if (tray.Visible != showIcon) Log("托盘图标" + (showIcon ? "出现" : "收起") + "（hidden=" + (hidden?.ToString() ?? "未知") + "，面板" + (panel.IsVisible ? "开着" : "关着") + "）");
+                tray.Visible = showIcon;
+            }
         }
-        await panel.Refresh();
-        if (tray is not null)
-        {
-            bool? hidden = panel.Hidden;
-            bool want = hidden == false || panel.IsVisible;
-            if (tray.Visible != want) Log($"visible {tray.Visible} -> {want} (hidden={hidden?.ToString() ?? "null"}, panel={panel.IsVisible}, pet={Pet.Running})");
-            tray.Text = hidden is null ? "大肥鱼（连接中）" : hidden == true ? "大肥鱼 · 收起着" : "大肥鱼 · 在桌面上";
-            // 她收着的时候托盘图标也不露面；她出场（或面板还开着）才出现，默认落在“显示隐藏的图标”里
-            tray.Visible = want;
-        }
+        finally { ticking = false; }
     }
 
-    private async void Quit()
+    private void Quit()
     {
         poll.Stop();
         if (tray is not null) { tray.Visible = false; tray.Dispose(); tray = null; }
-        panel?.Close();
-        await Pet.Call("quit"); // 退出控制台时，也让桌宠鞠躬退场（她收不着就作罢）
+        if (panel is not null) { panel.AllowClose = true; panel.Close(); }
         Shutdown();
+    }
+
+    // 气泡提示（不必等用户去任务栏里找）：托盘图标不在“显示隐藏的图标”里时也会弹出来
+    private void Balloon(string title, string text)
+    {
+        try { tray?.ShowBalloonTip(5000, title, text, ToolTipIcon.None); } catch { }
     }
 
     // 暗色右键菜单

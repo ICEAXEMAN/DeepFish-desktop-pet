@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -60,7 +60,7 @@ internal sealed class Behavior
             [("FaceAngleZ", "0:0 .5:3 1.3:-2 2.1:3 3.4:0"), ("ViewSquash", "0:0 .3:.01 2.8:.01 3.4:0")]),
         ["摸后不舍"] = new(["脸红"], [("EyeSmile", .45), ("BrowInnerUp", .9), ("MouthPressLipOpen", .5), ("ParamMouthForm", .2), ("ParamEyeBallY", -.45), ("FaceAngleY", -8), ("FaceAngleZ", 7)], 4,
             [("LeanInput", "0:0 .5:-9 3.3:-8 4:0"), ("FaceAngleZ", "0:0 .7:3 1.5:-3 2.3:3 3.1:-2 4:0"), ("ViewSquash", "0:0 .4:.02 3.4:.02 4:0")]),
-        ["摸后腻歪"] = new(["脸红"], [("EyeSmile", .6), ("ParamMouthForm", 1), ("MouthPressLipOpen", .4), ("BrowInnerUp", .6), ("FaceAngleY", -6), ("FaceAngleZ", 9)], 4.8,
+        ["摸后腻歪"] = new(["脸红", "爱心眼"], [("EyeSmile", .6), ("ParamMouthForm", 1), ("MouthPressLipOpen", .4), ("BrowInnerUp", .6), ("FaceAngleY", -6), ("FaceAngleZ", 9)], 4.8,
             [("LeanInput", "0:0 .5:-15 3.9:-14 4.8:0"), ("FaceAngleZ", "0:0 .8:3 1.6:-3 2.4:3 3.2:-3 4:2 4.8:0"), ("FaceAngleX", "0:0 .8:-4 1.8:4 2.8:-4 3.8:3 4.8:0"), ("ViewSquash", "0:0 .5:.03 4.1:.03 4.8:0")], ("默认手切举手", "举手切默认手")),
         // 摸头彩蛋（本机加，2026-11-11）：有效抚摸满 20 秒、融化后松手。脸红 + 手抬到胸口 + 快眨两下，6 秒。
         // 前倾：松手时按住 -17，表情里用动画加 0→+1 慢慢回到 -16，结束再交回给 clear 淡出，不会和旧值叠起来弹一下。
@@ -351,6 +351,50 @@ internal sealed class Behavior
             if (pick < 0) return name;
         }
         return items[^1].Name;
+    }
+
+    // How open her mouth is, one value per step of a 16-bit PCM wav; null for anything else.
+    internal static float[]? VoiceLevels(byte[] wav, int stepMilliseconds)
+    {
+        if (wav.Length < 44 || Encoding.ASCII.GetString(wav, 0, 4) != "RIFF" || Encoding.ASCII.GetString(wav, 8, 4) != "WAVE") return null;
+        int channels = 0, rate = 0, bits = 0;
+        for (int at = 12; at + 8 <= wav.Length;)
+        {
+            string chunk = Encoding.ASCII.GetString(wav, at, 4);
+            int size = BitConverter.ToInt32(wav, at + 4), start = at + 8;
+            if (size < 0) return null;
+            if (chunk == "fmt " && start + 16 <= wav.Length)
+            {
+                channels = BitConverter.ToInt16(wav, start + 2); rate = BitConverter.ToInt32(wav, start + 4); bits = BitConverter.ToInt16(wav, start + 14);
+            }
+            else if (chunk == "data")
+            {
+                if (bits != 16 || channels < 1 || rate < 1) return null;
+                return Levels(wav, start, Math.Min(size, wav.Length - start), channels, rate, stepMilliseconds);
+            }
+            at = start + size + (size & 1);
+        }
+        return null;
+    }
+
+    private static float[] Levels(byte[] wav, int start, int size, int channels, int rate, int stepMilliseconds)
+    {
+        int window = Math.Max(1, rate * stepMilliseconds / 1000) * channels * 2;
+        var loudness = new float[size / window];
+        for (int step = 0; step < loudness.Length; step++)
+        {
+            double sum = 0;
+            for (int at = start + step * window; at + 1 < start + (step + 1) * window; at += 2)
+            {
+                double sample = BitConverter.ToInt16(wav, at) / 32768.0;
+                sum += sample * sample;
+            }
+            loudness[step] = (float)Math.Sqrt(sum / (window / 2));
+        }
+        // Against the loud parts of this recording, so a quiet voice opens her mouth as far as a loud one.
+        float peak = loudness.Length == 0 ? 0 : loudness.Order().ElementAt(loudness.Length * 95 / 100);
+        if (peak <= 0) return new float[loudness.Length];
+        return loudness.Select(level => level / peak < .12f ? 0f : (float)Math.Min(1, Math.Sqrt(level / peak))).ToArray();
     }
 }
 

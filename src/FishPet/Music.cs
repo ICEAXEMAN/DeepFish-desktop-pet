@@ -42,6 +42,10 @@ internal sealed class Music : IDisposable
     private double lastOnsetBase;
     private double rms, bass, fluxAverage = .012, soundFor, level, bassSmooth, warmup;
     private readonly Dictionary<string, double> apps = new(StringComparer.OrdinalIgnoreCase); // 在出声的应用 → 电平
+    // 每个应用上一次“明显出声”（≥ 0.01）的时刻：看视频时声音忽大忽小，会话表里那一秒可能一个都没有，
+    // 只看这一秒就会把“网易云开着 + 没人出声”当成真的在放歌（2026-11-12，用户在 B 站看视频时她跳了）。
+    private readonly Dictionary<string, DateTime> appHeard = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly TimeSpan OthersQuietFor = TimeSpan.FromSeconds(30);
     private DateTime lastLineAt = DateTime.MinValue, lastStartAt = DateTime.MinValue, lastSoundAt = DateTime.MinValue;
     private TimeSpan lastRead;
 
@@ -97,9 +101,12 @@ internal sealed class Music : IDisposable
     }
 
     // 白名单里的音乐软件此刻有没有在出声。
-    // 两条都满足才算：① 它自己电平 ≥ 0.03（太小就是暂停/残留）；② 它是当前最响的几个之一（≥ 最响的 50%）
-    // ——这样放歌时算，聊天/视频盖过音乐时不算（2026-11-10 改，之前固定 0.05 太死板）。
-    // keep：已经在跳的时候门槛放低（0.015 / 28%），免得音量一小起一落就一停一跳（本机修，2026-11-12）。
+    // ① 它自己有活跃会话、电平 ≥ 0.03，而且没被别的软件彻底压住（≥ 最响的 25%）就算。
+    //    DirectSound 的会话表常常偏低、发死（2026-11-11 实测：网易云 DirectSound 一直是 0.045，
+    //    设备整体却在 0.04~0.17 之间起伏），以前“固定要最响的一半”会一直判成没在放。
+    // ② 连会话都没有（DirectSound「主声音驱动程序」）时：白名单软件在跑、别的软件都没出声，
+    //    也算它在放；有别的软件在响就不算，免得拿视频、游戏的声音乱跳。
+    // keep：已经在跳的时候门槛放低（0.015 / 20%），免得音量一小起一落就一停一跳（上游本机修，2026-11-12，与本机 25% 阈值合并）。
     internal bool AppPlaying(string whitelist, bool keep = false)
     {
         if (string.IsNullOrWhiteSpace(whitelist)) return false;
@@ -113,8 +120,51 @@ internal sealed class Music : IDisposable
                 if (name.Length == 0) continue;
                 if (apps.TryGetValue(name, out var level) && level > mine) mine = level;
             }
-            return mine >= (keep ? .015 : .03) && mine >= top * (keep ? .28 : .5);
+            if (mine >= (keep ? .015 : .03) && mine >= top * (keep ? .2 : .25)) return true;
+            // DirectSound「主声音驱动程序」下，网易云的会话电平会低到发死（2026-11-12 实测：放歌时一直是 0.018~0.020，
+            // 同时 oopz 之类的会话有 0.1 以上），按“够响、占最响的几分之几”永远过不了。
+            // 采集器只报“活动中”的会话，暂停/停止后几秒内它就从列表里消失了，所以有会话、电平不是纯噪声（≥ 0.008，
+            // 已经在跳时 ≥ 0.005）就当它在放；放歌软件的声音当没当主角，交给设备整体的节拍检测去判断。
+            if (mine >= (keep ? .005 : .008)) return true;
+            if (mine > 0) return false;
+            // 没有它的会话：只有“白名单软件在跑 + 除了白名单没人出声”才当它在放。
+            foreach (var (name, level) in apps)
+                if (level >= .03 && !Listed(name, whitelist)) return false;
+            // 别的软件最近 30 秒内出过声（视频、聊天、游戏）：这一秒碰巧没响也不算，白名单软件开着不等于在放歌。
+            var now = DateTime.UtcNow;
+            foreach (var (name, at) in appHeard)
+                if (now - at < OthersQuietFor && !Listed(name, whitelist)) return false;
+            RefreshProcesses();
+            foreach (var raw in whitelist.Split([',', '，', ';'], StringSplitOptions.RemoveEmptyEntries))
+                if (Running.Contains(raw.Trim())) return true;
+            return false;
         }
+    }
+
+    private static readonly HashSet<string> Running = new(StringComparer.OrdinalIgnoreCase);
+    private static DateTime nextRunningLook;
+
+    // 白名单软件在不在跑（没有会话时用），3 秒看一次就够。
+    private static void RefreshProcesses()
+    {
+        if (DateTime.UtcNow < nextRunningLook) return;
+        nextRunningLook = DateTime.UtcNow.AddSeconds(3);
+        Running.Clear();
+        try
+        {
+            foreach (var process in Process.GetProcesses())
+            {
+                try { Running.Add(process.ProcessName); } catch { } finally { process.Dispose(); }
+            }
+        }
+        catch { }
+    }
+
+    private static bool Listed(string name, string whitelist)
+    {
+        foreach (var raw in whitelist.Split([',', '，', ';'], StringSplitOptions.RemoveEmptyEntries))
+            if (string.Equals(raw.Trim(), name, StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
     }
 
     internal bool Rhythmic
@@ -234,6 +284,7 @@ internal sealed class Music : IDisposable
                     if (string.IsNullOrWhiteSpace(name) || item[1].ValueKind != JsonValueKind.Number) continue;
                     double value = item[1].GetDouble();
                     apps[name] = apps.TryGetValue(name, out var before) ? Math.Max(before, value) : value;
+                    if (value >= .01) appHeard[name] = DateTime.UtcNow;
                 }
             }
 
