@@ -84,9 +84,19 @@ if (Test-Path -LiteralPath $tray) {
     Run '托盘控制台编译' { & dotnet publish $tray -c Release -o (Join-Path $root 'tray\app') --nologo -v q }
     Ok '托盘控制台编译好了'
     # 托盘图标要从普通完整性（Medium）的进程发出去，Explorer 才收；Low 标签会让图标静默消失（本机加，2026-11-11）
+    # 普通文件夹本来就是 Medium，改不改都一样；可普通用户多半没有改标签的权限，会报“拒绝访问”。以前这一下会让脚本停住，
+    # 后面的桌面图标、测试、自检全被跳过（issue #1）。现在改不成也接着往下走，只有真带着 Low 标签时才提醒搬地方。
     foreach ($dir in @('bin', 'tray\app')) {
         $path = Join-Path $root $dir
-        if (Test-Path $path) { & icacls $path /setintegritylevel '(OI)(CI)M' /T 2>$null | Out-Null }
+        if (!(Test-Path -LiteralPath $path)) { continue }
+        $previous = $ErrorActionPreference; $ErrorActionPreference = 'Continue' # Windows PowerShell 5.1 会把原生命令的 stderr 当成错误抛出来
+        & icacls $path /setintegritylevel '(OI)(CI)M' /T /C /Q 2>&1 | Out-Null
+        # 不看退出码：带 /C 时没改成也可能返回 0。改完再读一遍标签，还是 Low 才算没改成。
+        $label = (& icacls $path 2>&1 | ForEach-Object { "$_" }) -join "`n"
+        $ErrorActionPreference = $previous
+        if ($label -match 'Low Mandatory Level|S-1-16-4096') {
+            Write-Host ('⚠ ' + $dir + ' 带着低完整性标签，又改不回来：托盘图标可能不出现，桌宠也可能连不上。把插件放到普通文件夹（不是 Agent 的工作区）重新拉一份再编译，见 AGENTS.md 第 2 步。') -ForegroundColor Yellow
+        }
     }
 }
 # 桌面上放一个「DeepFish」图标：双击就能手动把她叫出来（不用在 Agent 里打字）。--manual 让她不管「启动时先收起」直接露面，
