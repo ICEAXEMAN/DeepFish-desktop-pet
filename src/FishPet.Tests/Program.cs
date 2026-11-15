@@ -481,8 +481,9 @@ void VerifyWhatHerBodyTellsHer()
     while (folder != null && !File.Exists(Path.Combine(folder.FullName, "prompt", "身体说明.md"))) folder = folder.Parent;
     Check(folder != null, "the body guide is found");
     var guide = File.ReadAllText(Path.Combine(folder!.FullName, "prompt", "身体说明.md"));
-    Check(Body.GuideVersion(guide) == "2026-11-15-1" && guide.TrimEnd().EndsWith("【你的身体·完】（身体说明 2026-11-15-1 版）"), "the guide ends with its version");
+    Check(Body.GuideVersion(guide) == "2026-11-16-1" && guide.TrimEnd().EndsWith("【你的身体·完】（身体说明 2026-11-16-1 版）"), "the guide ends with its version");
     Check(guide.Contains("〔〕只写在 say 的 text 里") && guide.Contains("平时还能做的：") && guide.Contains("focus"), "brackets only in say, and the everyday tools");
+    Check(guide.Contains("先调一次 get_state 看 hidden") && guide.Contains("很久没动静"), "checks whether she is out, and reports progress while working");
     Check(guide.Contains("〔〕里只能写下面这些词") && guide.Contains("挑衅") && guide.Contains("- 苦笑：微笑 八字眉"), "only what her body can do, and the small moves in full");
     var examples = guide.Split('\n').Select(line => line.TrimEnd('\r')).Where(line => line.StartsWith("- 【") && line.Contains('→')).ToArray();
     Check(examples.Length == 12, "twelve examples");
