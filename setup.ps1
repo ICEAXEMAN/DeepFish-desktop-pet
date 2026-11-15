@@ -1,4 +1,4 @@
-# 大肥鱼 Live2D 桌宠插件：检查、编译、自检。在插件文件夹里运行：
+﻿# 大肥鱼 Live2D 桌宠插件：检查、编译、自检。在插件文件夹里运行：
 #   powershell -ExecutionPolicy Bypass -File setup.ps1          检查并编译
 #   powershell -ExecutionPolicy Bypass -File setup.ps1 -Check   编译完再开一个看不见的桌宠试一遍（推荐）
 # 缺什么就停下，告诉你缺什么、去哪里拿；不会自己下载 Live2D 的 SDK 或模型（它们要你自己同意各自的许可）。

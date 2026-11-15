@@ -631,10 +631,22 @@ internal sealed partial class PetWindow : Window
         text.Split([' ', '　', '、', '，', ','], StringSplitOptions.RemoveEmptyEntries).Where(name => PetProps.Names.Contains(name)).Distinct().ToArray();
 
     // 固定台词的录音包（本机加，2026-11-10）：second = voice\，calm = voice_calm\。切换时重新读索引，不用重启。
+    // 冷静、沉稳那套现在不随插件打包（用户 2026-11-15 让挪出去，压缩包放在桌面）：文件夹不在就当没有，
+    // 控制面板里的选项留着但点不动；真有人绕过去让她切，也直接回一句为什么，不假装切好了。
+    internal const string CalmMissing =
+        "冷静、沉稳这套录音这次没随插件打包（在桌面的「大肥鱼_冷静语音包」压缩包里）。要用的话，把压缩包里的 voice_calm 文件夹整个放回插件目录（和 voice 并排），重启桌宠就能切了。";
+    private static bool CalmPackHere() => Directory.Exists(Path.Combine(Places.Root, "voice_calm"));
+
     private void LoadVoicePack()
     {
+        if (settings.VoicePack == "calm" && !CalmPackHere())
+        {
+            // 文件夹被挪走了：别一直挂着 calm（那样每句都得回退去找 voice，面板却还显示冷静）
+            settings.VoicePack = "second";
+            settings.Save();
+            Places.Log("voice_calm 不在，语音包退回 second");
+        }
         var folder = Path.Combine(Places.Root, settings.VoicePack == "calm" ? "voice_calm" : "voice");
-        if (settings.VoicePack == "calm" && !Directory.Exists(folder)) folder = Path.Combine(Places.Root, "voice");
         voicePack = Voice.Load(folder);
         Places.Log($"语音包：{(voicePack == null ? "没有（只说话）" : $"{voicePack.Count} 条")}（{settings.VoicePack}）");
     }
@@ -1631,6 +1643,7 @@ internal sealed partial class PetWindow : Window
                 if (args.TryGetProperty("voice_pack", out var voicePackArg) && voicePackArg.ValueKind == JsonValueKind.String)
                 {
                     var id = string.Equals(voicePackArg.GetString(), "calm", StringComparison.OrdinalIgnoreCase) ? "calm" : "second";
+                    if (id == "calm" && !CalmPackHere()) throw new ArgumentException(CalmMissing); // 这套录音不在，别假装切过去了
                     if (id != settings.VoicePack)
                     {
                         settings.VoicePack = id;

@@ -68,7 +68,7 @@ internal static class Tools
             """{"wear":{"type":"array","items":{"type":"string"}},"remove":{"type":"array","items":{"type":"string"}}}""", []),
         Tool("get_state", "读你现在的状态和设置：体型、穿戴、帧率、大小、气泡大小和停多久、全屏时藏不藏（现在是不是正藏着）、视线是否跟着鼠标、空闲小动作的间隔、窗口位置、是否正在说话；" +
             "插件有新版本时 update 里写着落后几处改动、各是什么；affection 是你和用户的羁绊（0–200 分，五级：初识、磨合、同频、默契、羁绊），说话的亲疏可以跟着它走；" +
-            "focus 是番茄钟（phase：work 专注中、break 休息中、none 没开）；memory 只是小本本里有几条（内容用 recall 查）；voice_pack 是固定台词语音包（second 第二套 / calm 冷静、沉稳）。", "{}"),
+            "focus 是番茄钟（phase：work 专注中、break 休息中、none 没开）；memory 只是小本本里有几条（内容用 recall 查）；voice_pack 是固定台词语音包（second 第二套 / calm 冷静、沉稳；这套没随插件打包，切不过去时 voice_count 和这条说明就是原因）。", "{}"),
         Tool("focus", "番茄钟、专注陪伴：用户说要专注、学习、陪他认真一会儿时用。action：start 开始专注 25 分钟（你会戴上眼镜，只做安静的小动作，不嘀咕、不演小剧场），" +
             "到点会响一声提示音、伸个懒腰叫他休息，休息 5 分钟后再响一声问他继续不继续；stop 提前结束。专注时别用 say 打扰他，除非他先找你。",
             """{"action":{"type":"string","enum":["start","stop"]}}""", ["action"]),
@@ -80,7 +80,7 @@ internal static class Tools
             """{"id":{"type":"string"},"content":{"type":"string"},"source":{"type":"string","enum":["said","guess"]}}""", ["id"]),
         Tool("update_settings", "改设置，只改给了的项，保存下来。shape 体型：small（小只，默认）、chibi（Q 版）、full（全身）；fps 帧率：30、60、90、120；" +
             "scale 大小 0.5–2；bubble_scale 气泡大小 0.5–2（字和气泡一起缩放，跟 scale 无关）；bubble_seconds 说完后气泡停多久：0 按字数自动（5–20 秒，默认），" +
-            "5–180 固定秒数，-1 一直留着到下一句或被点掉；volume 语音音量 0–1（0 静音只出气泡，默认 0.25）；voice_enabled 语音总开关（关掉后预录和实时语音都不出声，托盘里实时语音/自动启动/音量一起隐藏）；voice_pack 固定台词语音包：second（第二套，默认）、calm（冷静、沉稳）；" +
+            "5–180 固定秒数，-1 一直留着到下一句或被点掉；volume 语音音量 0–1（0 静音只出气泡，默认 0.25）；voice_enabled 语音总开关（关掉后预录和实时语音都不出声，托盘里实时语音/自动启动/音量一起隐藏）；voice_pack 固定台词语音包：second（第二套，默认）、calm（冷静、沉稳，这套录音没随插件打包，没有 voice_calm 文件夹时切不过去、会告诉你原因）；" +
             "tts_enabled 现编的话要不要现场合成语音（默认关：在控制台打开并同意后才会连本机 GPT-SoVITS 服务）；tts_url 服务地址（默认 http://127.0.0.1:9880）；tts_speed 合成语速（默认 0.95）；tts_autostart 服务没在跑时由桌宠自己拉起来（默认关）；tts_dir 服务目录（留空自动找）；" +
             "hide_on_fullscreen 别的程序全屏（游戏、视频）时藏起来、不画，默认开；" +
             "follow_mouse 视线跟着鼠标；start_hidden 启动时先收起待命（用户叫才出场）；keep_on_screen 拖到屏幕边会弹回来（默认关，开了就拖不出屏幕外）；idle_seconds 没人理你时多久做一个小动作（15–600 秒，默认 300 秒）；check_updates 启动时和每 12 小时去 GitHub 看有没有新版本，默认关；coax_sleep 每晚 00:30 起自己出来哄睡（四层），coax_lunch 每天 11:30 提醒吃午饭，都按这台电脑的时钟、默认关；birthday 用户的生日（10-21 这样，那天你会说生日快乐；空字符串清掉）；" +

@@ -100,6 +100,16 @@ public partial class MainWindow : Window
         staySeg = MakeSeg(StayHost, StayNames, "stay", i => Queue("bubble_seconds", StayValues[i]));
         qualitySeg = MakeSeg(QualityHost, QualityNames, "quality", i => Queue("tex_scale", QualityValues[i]));
         voiceSeg = MakeSeg(VoiceHost, VoiceNames, "voice_pack", i => Queue("voice_pack", VoiceIds[i]));
+        // 冷静、沉稳这套录音不随插件打包了（用户 2026-11-15）：选项留着，但是点不动，旁边说清楚为什么
+        if (!CalmVoiceHere())
+        {
+            var calm = voiceSeg.Buttons[1];
+            calm.IsEnabled = false;
+            calm.Opacity = 0.45;
+            calm.Cursor = Cursors.No;
+            calm.ToolTip = "这套录音没随插件打包（在桌面的「大肥鱼_冷静语音包」压缩包里）";
+            VoiceHint.Visibility = Visibility.Visible;
+        }
         BuildSections();
 
         flush.Tick += async (_, _) => await Flush();
@@ -430,6 +440,9 @@ public partial class MainWindow : Window
 
     private void Touch(string key) => touched[key] = DateTime.UtcNow;
     private bool Fresh(string key) => !touched.TryGetValue(key, out var at) || (DateTime.UtcNow - at).TotalSeconds > 4;
+
+    // 冷静、沉稳的录音在不在插件里（用户 2026-11-15 把它挪出去单独打包放到桌面了）
+    private static bool CalmVoiceHere() => Pet.Root.Length > 0 && Directory.Exists(Path.Combine(Pet.Root, "voice_calm"));
 
     // ---- 滑动条：刻度、数值气泡、整条按住拖 ----
 
@@ -870,7 +883,7 @@ public partial class MainWindow : Window
             if (Fresh("tts_enabled")) SwTts.IsChecked = B("tts_enabled");
             if (Fresh("tts_autostart")) SwTtsAuto.IsChecked = B("tts_autostart");
             if (Fresh("voice_enabled")) { SwVoice.IsChecked = B("voice_enabled"); ApplyVoiceVisibility(); }
-            if (Fresh("voice_pack")) SetSeg(voiceSeg, T("voice_pack") == "calm" ? 1 : 0);
+            if (Fresh("voice_pack")) SetSeg(voiceSeg, T("voice_pack") == "calm" && voiceSeg.Buttons[1].IsEnabled ? 1 : 0);
             if (!dressBuilt) { var all = A("clothes").Concat(A("accessories")).ToArray(); if (all.Length > 0) BuildDress(all); }
             var wearing = A("wearing");
             foreach (var (label, chip) in chips) if (Fresh("dress:" + label)) chip.IsChecked = wearing.Contains(label);
