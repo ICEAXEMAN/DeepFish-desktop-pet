@@ -25,7 +25,7 @@ export function apply(ctx, config) {
     try { await appendFile(logPath, `${new Date().toISOString()} ${msg}\n`, 'utf-8') } catch {}
   }
 
-  async function sendEvent(eventName) {
+  async function sendEvent(eventName, attempt = 0) {
     try {
       const api = JSON.parse(await readFile(apiPath, 'utf-8'))
       const res = await fetch(`${api.url}/call/event`, {
@@ -38,7 +38,20 @@ export function apply(ctx, config) {
         body: JSON.stringify({ name: eventName }),
       })
       const text = await res.text()
-      await log(`sent ${eventName}: ${text.slice(0, 120)}`)
+      await log(`sent ${eventName}${attempt ? ` retry ${attempt}` : ''}: ${text.slice(0, 120)}`)
+      // 开工/收到 撞上她在说话时会被丢；等一两秒再试，别把开场白吞掉
+      if (attempt < 4 && (eventName === '收到' || eventName === '开工')) {
+        let reason = ''
+        try {
+          const outer = JSON.parse(text)
+          const inner = JSON.parse(outer?.content?.[0]?.text || '{}')
+          reason = String(inner?.reason || '')
+        } catch {}
+        if (reason.includes('她在说话') || reason.includes('她在忙别的')) {
+          await new Promise((resolve) => setTimeout(resolve, 1800))
+          return sendEvent(eventName, attempt + 1)
+        }
+      }
     } catch (e) {
       await log(`FAIL ${eventName}: ${e?.message || e}`)
     }
