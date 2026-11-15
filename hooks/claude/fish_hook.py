@@ -9,7 +9,8 @@
 #   PostToolUseFailure 工具出错         -> 出错（是编译、测试命令 -> 编译失败）
 #   PostToolUse Bash 成功               -> 只有测试命令才发：测试通过（输出里看得出有失败的 -> 编译失败）
 #   SessionStart(新开会话)              -> 开工        UserPromptSubmit 你发了消息  -> 收到
-#   SessionStart(接着上次 / 清空重来)   -> 新会话      PostToolUseFailure 被你中断  -> 中断
+#   SessionStart(接着上次 / 清空重来)   -> 继续会话    PostToolUseFailure 被你中断  -> 中断
+#   PreCompact 开始压缩                 -> 压缩开始    SessionStart(compact 压缩做完)  -> 压缩完成
 #   思考一分钟：你发了消息 1 分钟后这一轮还没做完、你也没再发新消息，演一个“加载”小动作（三个动作轮流不重复，不带台词）。
 #   思考超时：你发了消息 3 分钟后，这一轮还没做完、你也没有再发新消息，就喊一次（每轮最多一次）。
 #     做法：发消息那一刻拉起一个后台小进程（--think）睡 3 分钟再看一眼；这一轮已经做完或你又发了新消息，它就悄悄走。
@@ -219,7 +220,11 @@ def pick(data, session):
         source = data.get("source", "startup")
         if source == "startup":
             return "开工"
-        return "新会话" if source in ("resume", "clear") else None
+        if source == "compact":
+            return "压缩完成"  # /compact 或自动压缩做完了（用户 2026-11-16 要的）
+        return "继续会话" if source in ("resume", "clear") else None
+    if event == "PreCompact":
+        return "压缩开始"  # 开始压缩前（手动 /compact 和自动压缩都会来）
     if event == "UserPromptSubmit":
         return "收到"
     return None

@@ -115,6 +115,9 @@ void VerifyIdleSelfTalk()
     Check(loadFace.Contains("exp 加载 1") && loadBody.Overlays.Contains("加载"), "the loading icon is a word of her body");
     loadBody.Relax();
     Check(loadFace.Contains("exp 加载 0") && !loadBody.Overlays.Contains("加载"), "and it goes away with the rest when she relaxes");
+    Check(shipped["开工"].Rotate && shipped["收到"].Rotate, "events.txt: the start-of-work and got-it lines take turns");
+    Check(shipped.TryGetValue("压缩开始", out var packing) && packing.Lines.Length == 2 && packing.Cooldown == 0 && packing.Lines.All(line => line.Cue != null && line.Cue.Contains("加载")), "events.txt: two compact-start lines, no cooldown, each with the loading icon");
+    Check(shipped.TryGetValue("压缩完成", out var packed) && packed.Lines.Length == 2 && packed.Cooldown == 0 && packed.Lines.All(line => line.Text.Length > 0 && line.Cue != null), "events.txt: two compact-done lines, no cooldown");
     Check(shipped["授权"].Priority && !shipped["出错"].Priority && !shipped["完成"].Priority, "only the event that needs her owner is priority");
 
     // Not while she is speaking.
