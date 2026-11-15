@@ -326,11 +326,21 @@ internal sealed partial class PetWindow : Window
         Clamp();
     }
 
+    // 她脸的中间（DIP）：按这一点认她在哪块屏上（issue #3）。不用窗口中心：身子可以沉到任务栏下面、拖到屏外，脸才是她“在”的地方。
+    private Point FaceCenter() => new(Left + Width / 2, Top + Height * (Shape.HeadTop + Shape.HeadAt + .12) / 2);
+
+    // 她脸所在那块屏（不在任何屏上就取最近的）：整块屏和去掉任务栏的可用区域。
+    private (Rect Screen, Rect Work) Here()
+    {
+        var face = FaceCenter();
+        return Monitors.At(face.X, face.Y, Monitors.Scale(this));
+    }
+
     // She may sink behind the taskbar, but her face stays out.
     private void Clamp()
     {
         if (test) return;
-        var area = SystemParameters.WorkArea;
+        var area = Here().Work; // 放下时脸在哪块屏，就留在哪块屏里（以前只认主屏，副屏上会被拽回主屏）
         var shape = Shape;
         var bounds = new Rect(Width * shape.Side, Height * shape.HeadTop, Width * (1 - 2 * shape.Side), Height * (shape.HeadAt + .12 - shape.HeadTop));
         if (!settings.KeepOnScreen)
@@ -403,7 +413,7 @@ internal sealed partial class PetWindow : Window
     private (double Left, double Top)? RunStage(int stage, int fadeInMs = 220)
     {
         coaxEpoch++; // 正在归位的话作废
-        var area = SystemParameters.WorkArea;
+        var area = Here().Work; // 在她现在这块屏的正中演，别跑回主屏（先取，下面换体型、大小会挪动脸的位置）
         double targetLeft, targetTop;
         switch (stage)
         {
@@ -813,8 +823,7 @@ internal sealed partial class PetWindow : Window
     private void UpdateCut()
     {
         if (!IsVisible || test) return;
-        var work = SystemParameters.WorkArea;
-        var monitor = new Rect(0, 0, SystemParameters.PrimaryScreenWidth, SystemParameters.PrimaryScreenHeight);
+        var (monitor, work) = Here(); // 她在哪块屏，就躲哪块屏的任务栏（以前只认主屏，副屏的任务栏不裁）
         var window = new Rect(Left, Top, Width, Height);
         double left = work.Left > monitor.Left ? Math.Clamp(work.Left - window.Left, 0, window.Width) : 0;
         double top = work.Top > monitor.Top ? Math.Clamp(work.Top - window.Top, 0, window.Height) : 0;
