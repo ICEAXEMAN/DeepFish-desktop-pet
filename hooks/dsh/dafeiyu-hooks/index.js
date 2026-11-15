@@ -2,6 +2,7 @@
 // 不经过模型、不花 token；发不出去静默。事件是 scope-filtered 的（@deepseek-ai/dsh-scope）：
 // agent/* 事件要挂在每个 agent 的 ctx 上（agent.ctx），tools/result、subagent/end 挂在 root ctx。
 import { readFile, appendFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
 
 export const name = 'dafeiyu-hooks'
 
@@ -15,7 +16,9 @@ const THINK_TIMEOUT = 3 * 60 * 1000 // 收到消息 3 分钟后这一轮还没�
 const NEW_SESSION_GAP = 10 * 1000 // 新会话事件的最小间隔，防止子代理字段认错时连喊
 
 export function apply(ctx, config) {
-  const apiPath = config?.apiPath // 插件里的 api.json（cordis.patch.yml 里填）
+  // 配置里没填 / 还留着 <插件完整路径> 占位符时，用插件自己旁边的 api.json（hooks/dsh/dafeiyu-hooks → ../../../api.json）
+  const configured = typeof config?.apiPath === 'string' ? config.apiPath.trim() : ''
+  const apiPath = configured && !configured.includes('<插件完整路径>') ? configured : fileURLToPath(new URL('../../../api.json', import.meta.url))
   const logPath = new URL('./hook.log', import.meta.url) // 调试用：最近转发了什么、桌宠怎么回的
 
   async function log(msg) {
