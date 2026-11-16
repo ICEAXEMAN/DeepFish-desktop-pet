@@ -100,7 +100,9 @@ public partial class MainWindow : Window
         SetupSlider(BubbleSlider, BubbleMarks, BubbleValue, v => $"{v:0.0}×", (0.5, "0.5×"), (1, "1.0×"), (1.5, "1.5×"), (2, "2.0×"));
         SetupSlider(IdleSlider, IdleMarks, IdleValue, v => SecondsText(IdleStops[(int)Math.Round(v)]),
             (0, "15秒"), (Array.IndexOf(IdleStops, 30), "30秒"), (Array.IndexOf(IdleStops, 60), "1分"), (Array.IndexOf(IdleStops, 120), "2分"), (Array.IndexOf(IdleStops, 300), "5分"), (IdleStops.Length - 1, "10分"));
-        Wire(SwMusicDance, "music_dance"); Wire(SwFollow, "follow_mouse"); Wire(SwFull, "hide_on_fullscreen"); Wire(SwStartHidden, "start_hidden"); Wire(SwKeepOn, "keep_on_screen"); Wire(SwCoaxSleep, "coax_sleep"); Wire(SwCoaxLunch, "coax_lunch");
+        Wire(SwMusicDance, "music_dance"); Wire(SwFollow, "follow_mouse"); Wire(SwFull, "hide_on_fullscreen"); Wire(SwKeepOn, "keep_on_screen"); Wire(SwCoaxSleep, "coax_sleep"); Wire(SwCoaxLunch, "coax_lunch");
+        // 「跟随 Agent 一起启动」是 start_hidden 反过来：开 = 不先收着（2026-11-16）
+        SwStartHidden.Click += (_, _) => { Touch("start_hidden"); Queue("start_hidden", SwStartHidden.IsChecked != true); };
 
         ShowSwitch.Click += async (_, _) => await SetShown(ShowSwitch.IsChecked == true);
         CloseButton.Click += (_, _) => Hide(); // 点 X 只是关面板、收回小托盘，不退出
@@ -793,7 +795,7 @@ public partial class MainWindow : Window
             if (Fresh("quality")) SetSeg(qualitySeg, Math.Max(0, Array.IndexOf(QualityValues, D("tex_scale", 1))));
             if (Fresh("music_dance")) SwMusicDance.IsChecked = B("music_dance");
             if (Fresh("follow_mouse")) SwFollow.IsChecked = B("follow_mouse");            if (Fresh("hide_on_fullscreen")) SwFull.IsChecked = B("hide_on_fullscreen");
-            if (Fresh("start_hidden")) SwStartHidden.IsChecked = B("start_hidden");
+            if (Fresh("start_hidden")) SwStartHidden.IsChecked = !B("start_hidden");
             if (Fresh("keep_on_screen")) SwKeepOn.IsChecked = B("keep_on_screen");
             if (Fresh("coax_sleep")) SwCoaxSleep.IsChecked = B("coax_sleep");
             if (Fresh("coax_lunch")) SwCoaxLunch.IsChecked = B("coax_lunch");

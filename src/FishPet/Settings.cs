@@ -31,7 +31,8 @@ internal sealed class Settings
     // 听到电脑在放音乐就跟着跳（本机加，2026-11-10）：在 settings.json 里改成 false 就只放歌不跳舞。
     public bool MusicDance { get; set; } = true;
     // 启动时先收着：桌宠程序在运行，但她不露面，等用户叫她（show / say / coax）才出场。
-    public bool StartHidden { get; set; }
+    // 托盘里显示成反过来的「跟随 Agent 一起启动」（2026-11-16 用户要的）：开关默认关，也就是这里默认 true。
+    public bool StartHidden { get; set; } = true;
     // 拖到屏幕边上会弹回来，脸始终留在工作区里。默认关：能拖出屏幕，只留一小截在外面能拖回来。
     public bool KeepOnScreen { get; set; } = false;
     // Seconds between the small things she does by herself when nobody talks to her.

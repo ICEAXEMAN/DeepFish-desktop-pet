@@ -260,7 +260,7 @@
                                     <ToggleButton x:Name="SwFull" Style="{StaticResource Switch}" HorizontalAlignment="Right"/>
                                 </Grid>
                                 <Grid Margin="0,8">
-                                    <TextBlock Text="启动时先收起" VerticalAlignment="Center"/>
+                                    <TextBlock Text="跟随 Agent 一起启动" VerticalAlignment="Center"/>
                                     <ToggleButton x:Name="SwStartHidden" Style="{StaticResource Switch}" HorizontalAlignment="Right"/>
                                 </Grid>
                                 <Grid Margin="0,8">

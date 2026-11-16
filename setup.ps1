@@ -99,7 +99,7 @@ if (Test-Path -LiteralPath $tray) {
         }
     }
 }
-# 桌面上放一个「DeepFish」图标：双击就能手动把她叫出来（不用在 Agent 里打字）。--manual 让她不管「启动时先收起」直接露面，
+# 桌面上放一个「DeepFish」图标：双击就能手动把她叫出来（不用在 Agent 里打字）。--manual 让她不管「跟随 Agent 一起启动」开没开，直接露面，
 # 她已经在收着待命就叫醒。每次装/更新都会按现在的路径重写一次这个快捷方式。
 try {
     $desktop = [Environment]::GetFolderPath('Desktop')
