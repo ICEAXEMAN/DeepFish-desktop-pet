@@ -29,7 +29,7 @@
 
 发给它，或者在这个文件夹里打开它，或者直接把本页的 GitHub 链接发给它。
 
-- **支持 MCP 的 Agent**（Claude / Claude Code、DeepSeek Harness、Codex、Cursor……）直接接。
+- **支持 MCP 的 Agent**（Claude / Claude Code、DeepSeek Harness、Codex、Cursor……）直接接。[目前对Claude和DSH的兼容性强一些]
 - **自己用模型 API 搭的聊天程序**（SillyTavern、AstrBot、自己写的机器人……）通过本机网页接口接。
 
 ### 3. 照它说的做
