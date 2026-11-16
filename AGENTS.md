@@ -256,15 +256,15 @@ def run_tool(name: str, arguments: dict) -> dict:
 
 ## 第 9 步（可选）：干活时的反应
 
-接上以后，你干活时她会在旁边演一小下：开工打招呼、等用户批准时探头、出错冒冷汗、编译失败、测试通过、一轮做完、长任务做完夸他。全程不经过模型、不花 token；她收着、在说话时不演，也不会因此出场。台词在 `插件\events.txt`。用户想要才接。
+接上以后，你干活时她会在旁边演一小下：开工打招呼、等用户批准时探头、出错冒冷汗、编译失败、测试通过、一轮做完、长任务做完夸他。有任务清单的活，她还会照着清单报进度（一共几步、哪步做完了、接着做哪步、全部做完），命令跑太久会说一声还在跑。全程不经过模型、不花 token；她收着、在说话时不演，也不会因此出场。台词在 `插件\events.txt`。用户想要才接。
 
-- **Claude Code**（命令行和桌面版都读这个）：要装了 Python 3。在 `%USERPROFILE%\.claude\settings.json` 的 `hooks` 里，给 `Notification`、`Stop`、`SubagentStop`、`PostToolUse`、`PostToolUseFailure`、`SessionStart`、`UserPromptSubmit` 这几个事件各加一条命令 hook（原来有 hooks 的，加进去，别覆盖；`PostToolUse` 那条加上 `"matcher": "Bash"`，只看命令行工具）：
+- **Claude Code**（命令行和桌面版都读这个）：要装了 Python 3。在 `%USERPROFILE%\.claude\settings.json` 的 `hooks` 里，给 `Notification`、`Stop`、`SubagentStop`、`PreToolUse`、`PostToolUse`、`PostToolUseFailure`、`SessionStart`、`UserPromptSubmit`、`PreCompact` 这几个事件各加一条命令 hook（原来有 hooks 的，加进去，别覆盖；`PreToolUse` 那条加上 `"matcher": "Bash"`；`PostToolUse` 加两条，一条 `"matcher": "Bash"`，一条 `"matcher": "TodoWrite|mcp__ccd_turn__update_plan|mcp__ccd_turn__wrap_up"`，用来读任务清单报进度）：
   ```json
   { "hooks": [ { "type": "command", "command": "python \"完整路径\\hooks\\claude\\fish_hook.py\"", "timeout": 6 } ] }
   ```
   脚本自己会找到插件里的 `api.json`；出任何错都静悄悄退出，不影响你干活。调试看同目录的 `hook.log`。改完要重启你自己才生效。
 - **DeepSeek Harness**：把 `插件\hooks\dsh\dafeiyu-hooks` 当插件包装上（它的 `cordis.patch.yml` 里把 `<插件完整路径>` 换成真实路径；安装方式以 DeepSeek Harness 当前版本的插件包说明为准），开个新会话生效。`插件\hooks\dsh\dafeiyu-mcp` 是同样做法的 MCP 接入包，想用插件包而不是改 `cordis.patch.yml` 来接第 6 步时用。
-- 别的 Agent：有 hook 或事件机制的，照 `hooks\claude\fish_hook.py` 的做法，往 `POST {api.url}/call/event` 发 `{"name": "完成"}` 这样的事件名（带 `Authorization: Bearer <token>` 和 `X-FishTray: 1` 头），事件名见 `events.txt`。
+- 别的 Agent：有 hook 或事件机制的，照 `hooks\claude\fish_hook.py` 的做法，往 `POST {api.url}/call/event` 发 `{"name": "完成"}` 这样的事件名（带 `Authorization: Bearer <token>` 和 `X-FishTray: 1` 头），事件名见 `events.txt`。进度简报的事件（步骤开始、步骤完成等）还要带 `"vars"`，比如 `{"name": "步骤完成", "vars": {"step": "编译", "next": "测试", "left": "2", "total": "4"}}`，桌宠会把它填进台词里的 `{step}` 这类占位符。
 
 ## 平时怎么用
 

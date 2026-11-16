@@ -1593,9 +1593,16 @@ internal sealed partial class PetWindow : Window
         events.Load(Path.Combine(Places.Root, "events.txt"));
         if (!events.TryGet(name, out var def)) return Tools.Text(new { played = false, reason = "events.txt 里没有这个事件：" + name });
         var now = DateTime.UtcNow;
+        // 进度简报（本机加，2026-11-16）：vars 里的值填进台词的 {step} 这类占位符；简报类事件专注时一律不演（它们是“优先”的，不加这条会打扰专注）
+        var vars = new Dictionary<string, string>();
+        if (args.TryGetProperty("vars", out var varsValue) && varsValue.ValueKind == JsonValueKind.Object)
+            foreach (var item in varsValue.EnumerateObject())
+                vars[item.Name] = item.Value.ValueKind == JsonValueKind.String ? item.Value.GetString() ?? "" : item.Value.ToString();
+        var filled = EventBook.CleanVars(vars);
+        filled.TryAdd("等级", affection.LevelName); // 升级、降级的台词里本来就有 {等级}
         string? why =
             standby || hiding || hiddenForFullscreen || test ? "她收着或被全屏盖住，不叫她出场" :
-            focus.Now == FocusTimer.Phase.Work && !def.Priority && !FocusEvent(name) ? "在专注，不打扰" :
+            focus.Now == FocusTimer.Phase.Work && (!def.Priority || BriefEvents.Contains(name)) && !FocusEvent(name) ? "在专注，不打扰" :
             events.Cooling(def, now) ? "冷却中" :
             // 在说话、放语音、哄睡演出、被面板摆着姿势：谁都让位
             exiting || speech.IsSaying || silent != null || coaxAutoReturn || (panelHold && body.Posing) ? "她在说话或被摆着姿势" :
@@ -1604,10 +1611,15 @@ internal sealed partial class PetWindow : Window
         if (why != null) return Tools.Text(new { played = false, reason = why });
         // 连续工作满 2 小时：这一下换成提醒起来动一动
         if (restDue && PlayOwn("该休息")) { streak.Reminded(now); return Tools.Text(new { played = true, instead = "该休息" }); }
+        var line = events.ChooseFilled(def, random, filled);
+        if (line == null) return Tools.Text(new { played = false, reason = "台词里的占位符没给全：" + name });
         events.Played(def, now);
-        PlayEvent(events.Choose(def, random));
-        return Tools.Text(new { played = true });
+        PlayEvent(line);
+        return Tools.Text(new { played = true, said = line.Text });
     }
+
+    // 进度简报的事件（hook 自己限频，桌宠这边只管专注时别演）
+    private static readonly HashSet<string> BriefEvents = ["步骤开始", "步骤完成", "步骤接续", "步骤全完", "仍在进行", "编译中", "测试中", "推送中"];
 
     private async void PlayEvent(EventLine line)
     {
