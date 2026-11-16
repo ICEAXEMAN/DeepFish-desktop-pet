@@ -247,10 +247,23 @@
 
                         <Border Background="{StaticResource CardBrush}" BorderBrush="{StaticResource CardLineBrush}" BorderThickness="1" CornerRadius="14" Padding="16,6" Margin="0,0,0,12">
                             <StackPanel>
-                                <Grid Margin="0,8">
-                                    <TextBlock Text="听音乐跳舞" VerticalAlignment="Center"/>
-                                    <ToggleButton x:Name="SwMusicDance" Style="{StaticResource Switch}" HorizontalAlignment="Right"/>
-                                </Grid>
+                                <!-- 随音乐摇摆：点开选认哪些声音；右边小字写着现在认的是哪几类（2026-11-17） -->
+                                <ToggleButton x:Name="DanceFold" Style="{StaticResource SubFold}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="随音乐摇摆" VerticalAlignment="Center"/>
+                                        <StackPanel x:Name="DanceTags" Orientation="Horizontal" VerticalAlignment="Center" Margin="10,2,0,0"/>
+                                    </StackPanel>
+                                </ToggleButton>
+                                <StackPanel x:Name="DancePanel" Visibility="Collapsed" Margin="14,0,0,4">
+                                    <Grid Margin="0,6">
+                                        <TextBlock Text="识别音乐软件声音" VerticalAlignment="Center" Foreground="{StaticResource SubBrush}"/>
+                                        <ToggleButton x:Name="SwDanceApps" Style="{StaticResource Switch}" HorizontalAlignment="Right"/>
+                                    </Grid>
+                                    <Grid Margin="0,6">
+                                        <TextBlock Text="识别浏览器网页声音" VerticalAlignment="Center" Foreground="{StaticResource SubBrush}"/>
+                                        <ToggleButton x:Name="SwDanceBrowser" Style="{StaticResource Switch}" HorizontalAlignment="Right"/>
+                                    </Grid>
+                                </StackPanel>
                                 <Grid Margin="0,8">
                                     <TextBlock Text="视线跟着鼠标" VerticalAlignment="Center"/>
                                     <ToggleButton x:Name="SwFollow" Style="{StaticResource Switch}" HorizontalAlignment="Right"/>

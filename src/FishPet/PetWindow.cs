@@ -1527,9 +1527,15 @@ internal sealed partial class PetWindow : Window
                 if (args.TryGetProperty("coax_lunch", out var lunch) && lunch.ValueKind is JsonValueKind.True or JsonValueKind.False) settings.CoaxLunch = lunch.GetBoolean();
                 if (args.TryGetProperty("idle_seconds", out var idle) && idle.TryGetInt32(out var seconds)) settings.IdleSeconds = Math.Clamp(seconds, 15, 600);
                 // 跟着音乐跳：这两个原本只在工具说明里写着、这里没接，改了不生效（本机修，2026-11-12）
-                if (args.TryGetProperty("music_dance", out var dance) && dance.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                // 随音乐摇摆（2026-11-17）：dance_music_apps / dance_browser 是认哪几类声音，总开关 music_dance 跟着它们走
+                bool? danceOn = args.TryGetProperty("music_dance", out var dance) && dance.ValueKind is JsonValueKind.True or JsonValueKind.False ? dance.GetBoolean() : null;
+                bool danceKinds = false;
+                if (args.TryGetProperty("dance_music_apps", out var danceApps) && danceApps.ValueKind is JsonValueKind.True or JsonValueKind.False) { settings.DanceMusicApps = danceApps.GetBoolean(); danceKinds = true; }
+                if (args.TryGetProperty("dance_browser", out var danceBrowser) && danceBrowser.ValueKind is JsonValueKind.True or JsonValueKind.False) { settings.DanceBrowser = danceBrowser.GetBoolean(); danceKinds = true; }
+                if (danceKinds && danceOn is null) danceOn = settings.DanceMusicApps || settings.DanceBrowser;
+                if (danceOn == true && !settings.DanceMusicApps && !settings.DanceBrowser) settings.DanceMusicApps = true; // 只说“开”，就照老样子认音乐软件
+                if (danceOn is bool on)
                 {
-                    bool on = dance.GetBoolean();
                     if (on != settings.MusicDance)
                     {
                         settings.MusicDance = on;
@@ -1724,7 +1730,7 @@ internal sealed partial class PetWindow : Window
     {
         shape = settings.Shape, shapeLabel = Shape.Label, wearing = Wearing(), fps = settings.Fps, scale = settings.Scale, tex_scale = settings.TexScale, bubble_scale = settings.BubbleScale, bubble_seconds = settings.BubbleSeconds,
         hide_on_fullscreen = settings.HideOnFullscreen, hidden_for_fullscreen = hiddenForFullscreen && !standby, hidden = standby, start_hidden = settings.StartHidden, keep_on_screen = settings.KeepOnScreen, follow_mouse = settings.FollowMouse,
-        check_updates = settings.CheckUpdates, music_dance = settings.MusicDance, coax_sleep = settings.CoaxSleep, coax_lunch = settings.CoaxLunch, birthday = settings.Birthday,
+        check_updates = settings.CheckUpdates, music_dance = settings.MusicDance, dance_music_apps = settings.DanceMusicApps, dance_browser = settings.DanceBrowser, coax_sleep = settings.CoaxSleep, coax_lunch = settings.CoaxLunch, birthday = settings.Birthday,
         update = updates.Latest is { } found ? new { current = found.Current, latest = found.Latest, behind = found.Behind, changes = found.Changes, guide = found.Guide } : null,
         idle_seconds = settings.IdleSeconds, position = new { Left, Top }, saying = speech.IsSaying, reaction = behavior.Showing, trouble,
         clothes = Outfit.Clothes.Select(item => item.Label).ToArray(), accessories = Outfit.Accessories.Select(item => item.Label).ToArray(),

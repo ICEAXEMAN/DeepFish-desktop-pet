@@ -30,6 +30,13 @@ internal sealed class Settings
     public string MusicApps { get; set; } = "cloudmusic,qqmusic,qqmusicclient,spotify,applemusic,itunes,music,kugou,kuwo,qishui,musicbee,foobar2000,aimp";
     // 听到电脑在放音乐就跟着跳（本机加，2026-11-10）：在 settings.json 里改成 false 就只放歌不跳舞。
     public bool MusicDance { get; set; } = true;
+    // 随音乐摇摆认哪些声音（2026-11-17 用户要的）：音乐软件（上面的 MusicApps，默认开）、浏览器网页（BrowserApps，默认关）。
+    // 两个都关就等于 MusicDance 关；托盘里没有总开关了，只有这两个。
+    public bool DanceMusicApps { get; set; } = true;
+    public bool DanceBrowser { get; set; } = false;
+    public string BrowserApps { get; set; } = "chrome,msedge,firefox,brave,opera,vivaldi,arc,iexplore,360se,360chrome,360chromex,qqbrowser,sogouexplorer,2345explorer,liebao,maxthon,ucbrowser,quark,huaweibrowser,whale,thorium,chromium,waterfox,librewolf,zen";
+    // 跳舞白名单：开着的那几类拼起来
+    internal string DanceWhitelist => string.Join(",", new[] { DanceMusicApps ? MusicApps : "", DanceBrowser ? BrowserApps : "" }.Where(s => !string.IsNullOrWhiteSpace(s)));
     // 启动时先收着：桌宠程序在运行，但她不露面，等用户叫她（show / say / coax）才出场。
     // 托盘里显示成反过来的「跟随 Agent 一起启动」（2026-11-16 用户要的）：开关默认关，也就是这里默认 true。
     public bool StartHidden { get; set; } = true;
@@ -82,6 +89,7 @@ internal sealed class Settings
         TexScale = TexScale >= 1 ? 1 : TexScale >= 0.5 ? 0.5 : 0.25;
         BubbleScale = Math.Clamp(double.IsFinite(BubbleScale) && BubbleScale > 0 ? BubbleScale : 1, .5, 2);
         MusicApps = (MusicApps ?? "").Trim();
+        BrowserApps = (BrowserApps ?? "").Trim();
         BubbleSeconds = StayFor(BubbleSeconds);
         IdleSeconds = Math.Clamp(IdleSeconds, 15, 600);
         Birthday = Condition.NormalBirthday(Birthday) ?? "";

@@ -56,9 +56,9 @@ internal sealed partial class PetWindow
     {
         if (music is not { } ears) return;
         ears.Watch();
-        // 只有白名单里的音乐软件在出声才跳（2026-11-10 用户要的）：别被聊天、视频、系统提示带动
+        // 只有白名单里的音乐软件在出声才跳（2026-11-10 用户要的）：别被聊天、视频、系统提示带动；2026-11-17 起可以把浏览器也算上（DanceWhitelist）
 
-        if (ears.Playing && ears.Rhythmic && ears.AppPlaying(settings.MusicApps, Dancing) && !standby && !exiting) EnsureDanceTimer();
+        if (ears.Playing && ears.Rhythmic && ears.AppPlaying(settings.DanceWhitelist, Dancing) && !standby && !exiting) EnsureDanceTimer();
     }
 
     private void EnsureDanceTimer()
@@ -83,7 +83,7 @@ internal sealed partial class PetWindow
         }
         var now = DateTime.UtcNow;
         var beat = ears.Read();
-        bool allowed = beat.Playing && ears.Rhythmic && ears.AppPlaying(settings.MusicApps, Dancing) && DancingAllowed();
+        bool allowed = beat.Playing && ears.Rhythmic && ears.AppPlaying(settings.DanceWhitelist, Dancing) && DancingAllowed();
         if (!allowed)
         {
             // 拍子/识别偶尔断一下不算停：忍 1.5 秒，别一帧一帧地跳停（2026-11-10）
@@ -212,7 +212,7 @@ internal sealed partial class PetWindow
         var reasons = new List<string>();
         if (!beat.Playing) reasons.Add("没在放（响度停了或采集器没数据）");
         if (!ears.Rhythmic) reasons.Add($"拍子不够密（8 秒内 {ears.BeatCount} 个拍点，要 ≥3）");
-        if (!ears.AppPlaying(settings.MusicApps, true)) reasons.Add("白名单软件电平不够（各应用 " + ears.AppsText + "）");
+        if (!ears.AppPlaying(settings.DanceWhitelist, true)) reasons.Add("白名单软件电平不够（各应用 " + ears.AppsText + "）");
         if (DanceBlockedBy() is { } blocked) reasons.Add("让位：" + blocked);
         return reasons.Count == 0 ? "（掉的那一刻已经恢复了）" : string.Join("；", reasons);
     }
