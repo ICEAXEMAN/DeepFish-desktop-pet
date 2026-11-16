@@ -68,7 +68,7 @@
   <tr>
     <td align="center" valign="top">
       <img src="docs/demo/report.gif" width="300" alt="工作播报"><br>
-      <sub>干活时在旁边播报，还会戴上眼镜</sub>
+      <sub>干活时在旁边播报</sub>
     </td>
     <td align="center" valign="top">
       <img src="docs/demo/dance.gif" width="300" alt="跟着音乐跳舞"><br>
