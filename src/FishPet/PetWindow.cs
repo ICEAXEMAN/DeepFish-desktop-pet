@@ -405,7 +405,16 @@ internal sealed partial class PetWindow : Window
         RememberPlace();
         var pos = RunStage(stage);
         if (pos == null) return Tools.Error("stage 要 0–3。");
+        if (stage is >= 1 and <= 3) _ = CoaxSpeak(stage); // 摆好位置后把这一层真正会说的那句念出来
         return Tools.Text(new { stage, left = pos.Value.Left, top = pos.Value.Top, scale = settings.Scale });
+    }
+
+    // 哄睡演示出声：和到点走同一条路（AlarmLine + 录音），第四层由 Stage4Sequence 自己说。
+    private async Task CoaxSpeak(int stage)
+    {
+        await Task.Delay(600); // 等出场淡入、站稳
+        if (exiting || standby || hiding) return;
+        SpeakAlarmBubbles(AlarmLine($"哄睡{stage}"));
     }
 
     // 演哄睡前记下原来的体型、大小、位置，演完归位用。
@@ -488,7 +497,9 @@ internal sealed partial class PetWindow : Window
         await Task.Delay(350); // 睁眼后停顿一下
         body.Apply("大前倾"); // 身子猛地向前倾
         await Task.Delay(1000);
-        SayLine(coaxStage4Text ?? "为 什 么 还 没 睡 ？", null, 2); // 每字 0.5 秒（第四层演示用固定的那句）
+        var text = coaxStage4Text ?? "为 什 么 还 没 睡 ？";
+        // 有录音：等录音开始再起字，整句铺在录音长度上；没录音就按平常语速说
+        _ = SayWithVoiceAsync(text, CancellationToken.None);
     }
 
     // 归位（用户 2026-11-13 改）：先快速鞠躬淡出退场，趁看不见恢复原来的体型、大小、视线跟随，
@@ -1327,6 +1338,52 @@ internal sealed partial class PetWindow : Window
     {
         try { voicePlayer.Stop(); voicePlayer.Close(); } catch { /* 已经关了 */ }
         voice = null;
+    }
+
+    // 到点台词 / 哄睡演示专用：等录音真的开始放了再开口。
+    // WPF 的 MediaPlayer.Open 是异步的：Open 完立刻起字，字会比录音早跑完，
+    // 下一句再 Stop/Close 时就会把上一句的尾巴切掉（听感就是句尾卡一下），中间也多出一段空白。
+    // 这里等 MediaOpened 再起字，并且等这一句真的说完才返回，下一句才接上。
+    private async Task SayWithVoiceAsync(string text, CancellationToken token)
+    {
+        var file = settings.VoiceEnabled ? voicePack?.Find(Tts.Plain(text)) : null;
+        if (file == null || !File.Exists(file))
+        {
+            SayLine(text, null);
+            await WaitForLine(token);
+            return;
+        }
+        voicePlayer.Stop();
+        voicePlayer.Close();
+        voicePlayer.Open(new Uri(file));
+        voicePlayer.Volume = settings.Volume * VoiceGain;
+        double seconds = 0;
+        try
+        {
+            voice = Behavior.VoiceLevels(File.ReadAllBytes(file), VoiceStepMilliseconds);
+            if (voice != null)
+            {
+                seconds = voice.Length * VoiceStepMilliseconds / 1000.0;
+                voiceUntil = DateTime.UtcNow.AddMilliseconds(voice.Length * VoiceStepMilliseconds + 2000);
+            }
+        }
+        catch (IOException) { voice = null; }
+
+        var opened = new TaskCompletionSource();
+        void Start(object? sender, EventArgs e)
+        {
+            if (opened.Task.IsCompleted) return;
+            voicePlayer.MediaOpened -= Start;
+            opened.TrySetResult();
+        }
+        voicePlayer.MediaOpened += Start;
+        // 兜底：文件坏了或事件没来，也照样开口
+        _ = Task.Delay(250, token).ContinueWith(_ => opened.TrySetResult(), TaskScheduler.Default);
+        try { await opened.Task; } catch (TaskCanceledException) { return; }
+        if (exiting) return;
+        try { voicePlayer.Play(); } catch { /* 文件坏了就只打字 */ }
+        SayLine(text, seconds > 0 ? seconds : null);
+        await WaitForLine(token);
     }
 
     // Her recorded voice when there is one; otherwise her mouth moves while the words come out.
