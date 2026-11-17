@@ -38,7 +38,30 @@ internal sealed partial class PetWindow
             catch (Exception error) { Places.Log("welcome.txt 读不出来：" + error.Message); }
             Places.Log("第一次出场：说欢迎");
             foreach (var bubble in Welcome.Bubbles(Welcome.Text(fileLines)))
-                _ = InTurn(() => { if (!exiting) SayLine(bubble); return Task.CompletedTask; }, CancellationToken.None);
+            {
+                var (text, seconds, prop) = Welcome.Piece(bubble);
+                _ = InTurn(async () =>
+                {
+                    if (exiting) return;
+                    SayLine(text);
+                    // 这一段要戴的临时道具（比如第六段的黑框眼镜）：下一段一开口就被摘掉
+                    if (prop is { Length: > 0 }) PutOn([prop], Math.Max(seconds, 6) + 4);
+                    var plain = Welcome.Plain(text);
+                    if (plain.Trim().Length == 0) return; // 只有动作的段落，不用等
+                    double wait;
+                    if (seconds > 0) wait = seconds;
+                    else if (settings.BubbleSeconds == -1) wait = 20;
+                    else if (settings.BubbleSeconds > 0) wait = settings.BubbleSeconds;
+                    else wait = Speech.StaysFor(plain).TotalSeconds;
+                    if (wait > 0)
+                    {
+                        // 先等她把这一段说完，再开始停。不这样的话这个停和她说话同时跑，
+                        // 说完就已经停了，等于没停（2026-11-18 修）。
+                        while (speech.IsSaying && !exiting) await Task.Delay(50);
+                        await Task.Delay(TimeSpan.FromSeconds(wait));
+                    }
+                }, CancellationToken.None);
+            }
         }
         finally { welcoming = false; }
     }

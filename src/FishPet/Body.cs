@@ -75,6 +75,10 @@ internal sealed partial class Body
         // 笑眼状态下的单眨眼：眼睛先摆成笑眼，再让一只眼皮 0.8 秒闭一下、同时向左歪一下头（本机加，2026-11-11）
         ["快眨单眼"] = (_, _, _) => new(Channel: "eyes", Hold: [("EyeOpen", .45), ("EyeSmile", 1)],
             Move: [("ParamEyeLOpen", "0:0 .14:-1 .6:-1 .8:0"), ("FaceAngleZ", "0:0 .14:12 .6:12 .8:0")]),
+        // 单眼眨一下、闭眼停 0.6 秒（用户 2026-11-18 要的：欢迎收尾用，比「快眨单眼」慢、比「单眨眼」短）
+        ["单左眨眼"] = (_, _, _) => new(Move: [("ParamEyeLOpen", "0:0 .12:-1 .72:-1 .85:0")]),
+        // 只把眼睛收回默认：睁开、笑眼关掉；嘴和身子都不动（用户 2026-11-18 要的）
+        ["默认眼"] = (_, _, _) => new("eyes", [("EyeOpen", 1), ("EyeSmile", 0)]),
         ["挑眉"] = (_, s, _) => new("brows", [("ParamBrowLY", .6 * s), ("ParamBrowRY", .6 * s), ("BrowInnerUp", .4 * s)]),
         ["皱眉"] = (_, s, _) => new("brows", [("ParamBrowLY", -.8 * s), ("ParamBrowRY", -.8 * s), ("ParamBrowLAngle", -s), ("ParamBrowRAngle", -s)]),
         ["八字眉"] = (_, s, _) => new("brows", [("BrowInnerUp", s), ("ParamBrowLAngle", .6 * s), ("ParamBrowRAngle", .6 * s)]),

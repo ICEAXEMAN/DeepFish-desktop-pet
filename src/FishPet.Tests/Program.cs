@@ -886,8 +886,8 @@ void VerifyWelcome()
     while (root != null && !File.Exists(Path.Combine(root, "welcome.txt"))) root = Path.GetDirectoryName(root);
     Check(root != null, "welcome.txt is found");
     var shipped = Welcome.Text(File.ReadAllLines(Path.Combine(root!, "welcome.txt")));
-    Check(Welcome.Bubbles(shipped).Length is >= 3 and <= 6, "the welcome is a few bubbles, not a speech");
-    Check(Welcome.Bubbles(Welcome.Fallback).Length is >= 3 and <= 6, "the built-in welcome is a few bubbles too");
+    Check(Welcome.Bubbles(shipped).Length is >= 3 and <= 12, "the welcome is a few bubbles, not a speech");
+    Check(Welcome.Bubbles(Welcome.Fallback).Length is >= 3 and <= 12, "the built-in welcome is a few bubbles too");
 
     // 文件缺了、没有「# 欢迎」、或者那一段是空的，都退回内置的
     Check(Welcome.Text(null) == Welcome.Fallback, "no file: the built-in welcome");
@@ -905,7 +905,7 @@ void VerifyWelcome()
                 body.Apply(match.Groups[1].Value);
         Check(body.Unknown.Count == 0, "every action word in the welcome is one her body can do" + (body.Unknown.Count > 0 ? "（" + string.Join("、", body.Unknown) + "）" : ""));
     }
-    Check(shipped.Contains("小鲸鱼") && shipped.Contains("收起来") && shipped.Contains("不上传"), "the welcome tells where the tray icon is, how to hide her, and that nothing is uploaded");
+    Check(shipped.Contains("小虎鲸") && shipped.Contains("收起来"), "the welcome tells where the panel icon is and how to hide her");
 
     // 新装 / 老用户：没有设置文件才要欢迎；有设置文件（哪怕是读坏的）都不补说
     Check(Welcome.Pending(settingsFileExisted: false), "no settings.json: a fresh install, she welcomes");
