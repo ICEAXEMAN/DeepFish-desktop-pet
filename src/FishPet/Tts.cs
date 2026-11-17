@@ -175,10 +175,6 @@ internal static class Tts
     internal static string RefJa => Path.Combine(Places.Root, "voice", "ref", "语音参考.wav");
     internal static string RefCalm => Path.Combine(Places.Root, "voice_calm", "ref", "语音参考.wav");
     internal static string RefZh => Path.Combine(Places.Root, "voice", "ref", "zh_boot.wav");
-    // 中文语音（本机加，2026-11-16）：说中文时直接念中文，用中文语音包自己的参考音。
-    // 参考音必须在 3~10 秒之间，prompt 要和它说的一字不差（这两样跟生成中文语音包时用的同一份）。
-    internal const string PromptZhVoice = "收到收到，开始处理这个bug，老大的token够吗？不够记得充值";
-    internal static string RefZhVoice => Path.Combine(Places.Root, "voice_zh", "ref", "语音参考.wav");
 
     internal static string Cache => Path.Combine(Path.GetTempPath(), "fishpet-tts");
 
@@ -212,16 +208,6 @@ internal static class Tts
 
         bool japanese = Japanese(plain);
         string spoken, promptLang, reference, prompt;
-        if (settings.VoiceLanguage == "zh")
-        {
-            // 说中文（本机加，2026-11-16）：字幕就是要念的字，直接合成中文，不再翻成日语；
-            // 参考音用 voice_zh\ref\语音参考.wav（中文），prompt 和它说的一字不差。
-            spoken = plain;
-            promptLang = "zh";
-            reference = RefZhVoice;
-            prompt = PromptZhVoice;
-        }
-        else
         {
             // 字幕是中文，声音仍然是日语：没有假名的中文先翻成日语，再用日语参考合成（2026-11-11 用户定的）。
             // 有假名就直接按日语念。翻译失败就只打字，不出中文配音。
@@ -246,7 +232,7 @@ internal static class Tts
         if (lastReference != reference)
         {
             lastReference = reference;
-            Places.Log("实时语音参考：" + (promptLang == "zh" ? "中文（voice_zh）" : reference == RefCalm ? "第二套" : "第一套"));
+            Places.Log("实时语音参考：" + (reference == RefCalm ? "第二套" : "第一套"));
         }
         if (!File.Exists(reference)) return null;
 

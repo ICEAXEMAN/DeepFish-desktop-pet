@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -23,9 +23,6 @@ internal sealed class Settings
     public bool VoiceEnabled { get; set; } = true;
     // 固定台词用哪套录音（本机加，2026-11-10）：second = voice\（第二套），calm = voice_calm\（冷静、沉稳）。
     public string VoicePack { get; set; } = "second";
-    // 说哪国话（本机加，2026-11-16，用户要的控制台一键切换）：jp = 日语（voice\ + 日语参考音，现编的中文先翻日语再念）；
-    // zh = 中文（voice_zh\ + 中文参考音，固定台词和现编的话都直接说中文）。中文包不在就自动退回 jp。
-    public string VoiceLanguage { get; set; } = "jp";
     // 实时语音（本机加，2026-11-09）：say 的现编台词交给本机 GPT-SoVITS（v5turbo）现场合成。
     // 服务没开就当没有，只打字；tts_speed 是合成语速，跟预录音的 0.95 保持一致。
     // 默认关闭：必须由用户本人在控制台打开并同意，才会连接/调用 GPT-SoVITS（2026-11-11）。
@@ -115,7 +112,6 @@ internal sealed class Settings
         BubbleScale = Math.Clamp(double.IsFinite(BubbleScale) && BubbleScale > 0 ? BubbleScale : 1, .5, 2);
         Volume = Math.Clamp(double.IsFinite(Volume) ? Volume : .8, 0, 1);
         VoicePack = string.Equals(VoicePack, "calm", StringComparison.OrdinalIgnoreCase) ? "calm" : "second";
-        VoiceLanguage = string.Equals(VoiceLanguage, "zh", StringComparison.OrdinalIgnoreCase) ? "zh" : "jp";
         TtsSpeed = Math.Clamp(double.IsFinite(TtsSpeed) ? TtsSpeed : .95, .7, 1.5);
         TtsUrl = string.IsNullOrWhiteSpace(TtsUrl) ? "http://127.0.0.1:9880" : TtsUrl.Trim();
         TtsDir = (TtsDir ?? "").Trim();

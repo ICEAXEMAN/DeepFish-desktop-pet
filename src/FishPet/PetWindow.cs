@@ -635,33 +635,20 @@ internal sealed partial class PetWindow : Window
     // 控制面板里的选项留着但点不动；真有人绕过去让她切，也直接回一句为什么，不假装切好了。
     internal const string CalmMissing =
         "冷静、沉稳这套录音这次没随插件打包（在桌面的「大肥鱼_冷静语音包」压缩包里）。要用的话，把压缩包里的 voice_calm 文件夹整个放回插件目录（和 voice 并排），重启桌宠就能切了。";
-    internal const string ChineseMissing =
-        "中文语音包还没装：插件目录里没有 voice_zh 文件夹。把中文录音（voice_zh：wav + index.json + ref\\语音参考.wav）放进去，和 voice 并排，再切一次就好。";
     private static bool CalmPackHere() => Directory.Exists(Path.Combine(Places.Root, "voice_calm"));
-    private static bool ChinesePackHere() => Directory.Exists(Path.Combine(Places.Root, "voice_zh"));
 
     private void LoadVoicePack()
     {
-        // 中文语音（本机加，2026-11-16）：voice_zh\ 是中文录音。切到中文时固定台词、触碰台词、
-        // 小剧场、事件都念中文；实时语音也跟着直接说中文（见 Tts）。中文包不在就退回日语，别让她对着中文口型说日语。
-        var chinese = settings.VoiceLanguage == "zh";
-        if (chinese && !ChinesePackHere())
-        {
-            settings.VoiceLanguage = "jp";
-            settings.Save();
-            Places.Log("voice_zh 不在，语音退回日语");
-            chinese = false;
-        }
-        if (!chinese && settings.VoicePack == "calm" && !CalmPackHere())
+        if (settings.VoicePack == "calm" && !CalmPackHere())
         {
             // 文件夹被挪走了：别一直挂着 calm（那样每句都得回退去找 voice，面板却还显示冷静）
             settings.VoicePack = "second";
             settings.Save();
             Places.Log("voice_calm 不在，语音包退回 second");
         }
-        var folder = Path.Combine(Places.Root, chinese ? "voice_zh" : settings.VoicePack == "calm" ? "voice_calm" : "voice");
+        var folder = Path.Combine(Places.Root, settings.VoicePack == "calm" ? "voice_calm" : "voice");
         voicePack = Voice.Load(folder);
-        var which = chinese ? "中文" : settings.VoicePack == "calm" ? "冷静" : "日语";
+        var which = settings.VoicePack == "calm" ? "冷静" : "日语";
         Places.Log($"语音包：{(voicePack == null ? "没有（只说话）" : $"{voicePack.Count} 条")}（{which}）");
     }
 
@@ -1666,19 +1653,6 @@ internal sealed partial class PetWindow : Window
                         LoadTouchFile();
                     }
                 }
-                // 说哪国话（本机加，2026-11-16）：固定台词换 voice_zh\，实时语音改成直接念中文；切完立刻生效，不用重启。
-                if (args.TryGetProperty("voice_language", out var langArg) && langArg.ValueKind == JsonValueKind.String)
-                {
-                    var lang = string.Equals(langArg.GetString(), "zh", StringComparison.OrdinalIgnoreCase) ? "zh" : "jp";
-                    if (lang == "zh" && !ChinesePackHere()) throw new ArgumentException(ChineseMissing);
-                    if (lang != settings.VoiceLanguage)
-                    {
-                        settings.VoiceLanguage = lang;
-                        voice = null;
-                        try { voicePlayer.Close(); } catch { /* 已经关了 */ }
-                        LoadVoicePack();
-                    }
-                }
                 // Taken up at once: hidden behind a fullscreen program she comes back if it is turned off.
                 if (args.TryGetProperty("hide_on_fullscreen", out var hide) && hide.ValueKind is JsonValueKind.True or JsonValueKind.False)
                 {
@@ -1912,7 +1886,6 @@ internal sealed partial class PetWindow : Window
         shape = settings.Shape, shapeLabel = Shape.Label, wearing = Wearing(), fps = settings.Fps, scale = settings.Scale, tex_scale = settings.TexScale, bubble_scale = settings.BubbleScale, bubble_seconds = settings.BubbleSeconds, volume = settings.Volume,
         voice_enabled = settings.VoiceEnabled,
         voice_pack = settings.VoicePack, voice_count = voicePack?.Count ?? 0,
-        voice_language = settings.VoiceLanguage,
         tts_enabled = settings.TtsEnabled, tts_url = settings.TtsUrl, tts_speed = settings.TtsSpeed, tts_autostart = settings.TtsAutostart, tts_dir = settings.TtsDir,
         hide_on_fullscreen = settings.HideOnFullscreen, hidden_for_fullscreen = hiddenForFullscreen && !standby, hidden = standby, hiding, start_hidden = settings.StartHidden, keep_on_screen = settings.KeepOnScreen, follow_mouse = settings.FollowMouse,
         check_updates = settings.CheckUpdates, coax_sleep = settings.CoaxSleep, coax_lunch = settings.CoaxLunch, birthday = settings.Birthday,
