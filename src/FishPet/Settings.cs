@@ -44,9 +44,12 @@ internal sealed class Settings
     public bool KeepOnScreen { get; set; } = false;
     // Seconds between the small things she does by herself when nobody talks to her.
     public int IdleSeconds { get; set; } = 300;
-    // 到点叫人（本机加，2026-11-08）：按这台电脑的时钟，00:30 起四层哄睡、11:30 午饭提醒。默认关，托盘“更多”里能开。
+    // 到点叫人（本机加，2026-11-08）：按这台电脑的时钟，默认 00:30 起四层哄睡、11:30 午饭提醒（时间可调）。默认关，托盘“更多”里能开。
     public bool CoaxSleep { get; set; } = false;
     public bool CoaxLunch { get; set; } = false;
+    // 两个提醒几点开始（2026-11-18）：睡觉 22:00–02:00、午饭 11:00–13:30，15 分钟一档（Alarms.cs）
+    public string SleepAt { get; set; } = Alarms.DefaultSleepAt;
+    public string LunchAt { get; set; } = Alarms.DefaultLunchAt;
     // 用户的生日（MM-dd，比如 10-21）：那天她会说生日快乐、演生日小剧场（mutter.txt、skits.txt 里写着 @生日 的）。空着就没有。
     public string Birthday { get; set; } = "";
     // 待机自言自语：桌宠自己调大模型现编嘀咕。
@@ -92,6 +95,8 @@ internal sealed class Settings
         BrowserApps = (BrowserApps ?? "").Trim();
         BubbleSeconds = StayFor(BubbleSeconds);
         IdleSeconds = Math.Clamp(IdleSeconds, 15, 600);
+        SleepAt = Alarms.SleepTime(SleepAt) ?? Alarms.DefaultSleepAt;
+        LunchAt = Alarms.LunchTime(LunchAt) ?? Alarms.DefaultLunchAt;
         Birthday = Condition.NormalBirthday(Birthday) ?? "";
         MutterChance = Math.Clamp(double.IsFinite(MutterChance) ? MutterChance : 0.5, 0, 1);
         return this;

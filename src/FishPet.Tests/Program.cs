@@ -850,6 +850,23 @@ void VerifyAlarms()
     Check(Names(At(9, 0, 20), At(9, 0, 48)).SequenceEqual(["哄睡4"]), "after a long sleep only the one still fresh");
     Check(Names(At(8, 22, 0), At(9, 9, 0)).Count == 0, "a night asleep rings nothing in the morning");
     Check(Names(At(9, 0, 31), At(9, 0, 30)).Count == 0, "clock going back rings nothing");
+
+    // 提醒时间可调（2026-11-18）：睡觉 22:00–02:00、午饭 11:00–13:30，15 分钟一档；四层跟着起点走，跨午夜也不漏
+    List<string> NamesAt(DateTime a, DateTime b, string sleepAt, string lunchAt = "11:30") => Alarms.Due(a, b, true, true, sleepAt, lunchAt).Select(slot => slot.Name).ToList();
+    Check(NamesAt(At(8, 23, 44, 59), At(8, 23, 45, 0), "23:45").SequenceEqual(["哄睡1"]), "sleep reminder starts at the chosen time");
+    Check(NamesAt(At(8, 23, 54, 59), At(8, 23, 55, 0), "23:45").SequenceEqual(["哄睡2"]), "second stage follows ten minutes later");
+    Check(NamesAt(At(8, 23, 59, 59), At(9, 0, 0, 0), "23:45").SequenceEqual(["哄睡3"]), "third stage lands on midnight");
+    Check(NamesAt(At(9, 0, 1, 59), At(9, 0, 2, 0), "23:45").SequenceEqual(["哄睡4"]), "fourth stage after midnight");
+    Check(NamesAt(At(8, 23, 59, 30), At(9, 0, 0, 30), "23:45").SequenceEqual(["哄睡3"]), "a check spanning midnight still catches the midnight stage");
+    Check(NamesAt(At(9, 0, 29, 59), At(9, 0, 30, 0), "23:45").Count == 0, "the old 00:30 no longer rings");
+    Check(NamesAt(At(9, 12, 14, 59), At(9, 12, 15, 0), "00:30", "12:15").SequenceEqual(["午饭"]), "lunch at the chosen time");
+    Check(Alarms.SleepTime("22:00") == "22:00" && Alarms.SleepTime("2:00") == "02:00" && Alarms.SleepTime("0:37") == "00:30" && Alarms.SleepTime("0:38") == "00:45", "sleep time snaps to 15 minutes");
+    Check(Alarms.SleepTime("21:45") == null && Alarms.SleepTime("02:15") == null && Alarms.SleepTime("12:00") == null && Alarms.SleepTime("abc") == null, "sleep time stays in 22:00–02:00");
+    Check(Alarms.LunchTime("11:00") == "11:00" && Alarms.LunchTime("13:30") == "13:30" && Alarms.LunchTime("10:45") == null && Alarms.LunchTime("13:45") == null, "lunch time stays in 11:00–13:30");
+    Check(Alarms.LunchTime("12：00") == "12:00", "full-width colon is read");
+    Check(Alarms.Spoken(0, 30) == "十二点半" && Alarms.Spoken(11, 45) == "十一点四十五" && Alarms.Spoken(13, 0) == "一点" && Alarms.Spoken(22, 15) == "十点十五"
+        && Alarms.Spoken(2, 0) == "两点" && Alarms.Spoken(0, 40) == "十二点四十" && Alarms.Spoken(23, 47) == "十一点四十七" && Alarms.Spoken(1, 2) == "一点零二", "times read aloud");
+    Check(Alarms.Schedule("bad", "bad").Select(slot => (slot.Hour, slot.Minute)).SequenceEqual(Alarms.Slots.Select(slot => (slot.Hour, slot.Minute))), "unreadable times fall back to the defaults");
     var root = AppContext.BaseDirectory;
     while (root != null && !File.Exists(Path.Combine(root, "alarms.txt"))) root = Path.GetDirectoryName(root);
     Check(root != null, "alarms.txt is found");

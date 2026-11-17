@@ -19,7 +19,7 @@ internal sealed partial class PetWindow
         if (utc < alarmNextLook) return;
         alarmNextLook = utc.AddSeconds(1);
         var now = DateTime.Now;
-        var due = Alarms.Due(alarmLast, now, settings.CoaxSleep, settings.CoaxLunch);
+        var due = Alarms.Due(alarmLast, now, settings.CoaxSleep, settings.CoaxLunch, settings.SleepAt, settings.LunchAt);
         alarmLast = now;
         foreach (var slot in due) _ = Ring(slot);
     }
@@ -41,7 +41,7 @@ internal sealed partial class PetWindow
         alarmBusy = true;
         try
         {
-            var text = AlarmLine(slot.Name);
+            var text = AlarmLine(slot.Name).Replace("{时间}", Alarms.Spoken(slot.Hour, slot.Minute));
             Places.Log($"到点：{slot.Name}");
             YieldMutter();
             bool hadPlace = coaxScale != 0; // 之前已经有人记过位置（别的一层还在演）就别替人家清掉

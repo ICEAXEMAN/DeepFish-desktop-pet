@@ -57,6 +57,8 @@ public partial class MainWindow : Window
         public bool Pin { get; set; }
         public bool More { get; set; }
         public bool Dance { get; set; } // “随音乐摇摆”那一行展开着没有
+        public bool Sleep { get; set; } // “睡觉提醒”那一行展开着没有（默认折叠）
+        public bool Lunch { get; set; } // “午饭提醒”那一行展开着没有（默认折叠）
         public bool Taskbar { get; set; } = true; // 在任务栏显示面板（默认开，2026-11-18 起）：开了任务栏上有个按钮，面板有最小化键；点 X 仍是收回小托盘
 
         private static string File_ => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "ui.json"));
@@ -87,6 +89,10 @@ public partial class MainWindow : Window
         MoreToggle.IsChecked = ui.More; MorePanel.Visibility = ui.More ? Visibility.Visible : Visibility.Collapsed;
         DanceFold.IsChecked = ui.Dance; DancePanel.Visibility = ui.Dance ? Visibility.Visible : Visibility.Collapsed;
         DanceFold.Click += (_, _) => { ui.Dance = DanceFold.IsChecked == true; DancePanel.Visibility = ui.Dance ? Visibility.Visible : Visibility.Collapsed; ui.Save(); };
+        SleepFold.IsChecked = ui.Sleep; SleepPanel.Visibility = ui.Sleep ? Visibility.Visible : Visibility.Collapsed;
+        SleepFold.Click += (_, _) => { ui.Sleep = SleepFold.IsChecked == true; SleepPanel.Visibility = ui.Sleep ? Visibility.Visible : Visibility.Collapsed; ui.Save(); };
+        LunchFold.IsChecked = ui.Lunch; LunchPanel.Visibility = ui.Lunch ? Visibility.Visible : Visibility.Collapsed;
+        LunchFold.Click += (_, _) => { ui.Lunch = LunchFold.IsChecked == true; LunchPanel.Visibility = ui.Lunch ? Visibility.Visible : Visibility.Collapsed; ui.Save(); };
         // 随音乐摇摆认哪些声音：两个都关就是不跳（桌宠那边总开关 music_dance 跟着它们走）
         SwDanceApps.Click += (_, _) => { Queue("dance_music_apps", SwDanceApps.IsChecked == true); ShowDanceTags(); };
         SwDanceBrowser.Click += (_, _) => { Queue("dance_browser", SwDanceBrowser.IsChecked == true); ShowDanceTags(); };
@@ -108,6 +114,15 @@ public partial class MainWindow : Window
         SetupSlider(IdleSlider, IdleMarks, IdleValue, v => SecondsText(IdleStops[(int)Math.Round(v)]),
             (0, "15秒"), (Array.IndexOf(IdleStops, 30), "30秒"), (Array.IndexOf(IdleStops, 60), "1分"), (Array.IndexOf(IdleStops, 120), "2分"), (Array.IndexOf(IdleStops, 300), "5分"), (IdleStops.Length - 1, "10分"));
         Wire(SwFollow, "follow_mouse"); Wire(SwFull, "hide_on_fullscreen"); Wire(SwKeepOn, "keep_on_screen"); Wire(SwCoaxSleep, "coax_sleep"); Wire(SwCoaxLunch, "coax_lunch");
+        // 两个提醒的时间（2026-11-18）：滑块一档 15 分钟；睡觉从 22:00 数到 02:00，午饭从 11:00 数到 13:30
+        SleepSlider.ValueChanged += (_, e) => { if (!loading) Queue("sleep_at", SleepText(e.NewValue)); };
+        LunchSlider.ValueChanged += (_, e) => { if (!loading) Queue("lunch_at", LunchText(e.NewValue)); };
+        SetupSlider(SleepSlider, SleepSliderMarks, SleepSliderValue, SleepText, (0, "22:00"), (4, "23:00"), (8, "0:00"), (12, "1:00"), (16, "2:00"));
+        SetupSlider(LunchSlider, LunchSliderMarks, LunchSliderValue, LunchText, (0, "11:00"), (2, "11:30"), (4, "12:00"), (6, "12:30"), (8, "13:00"), (10, "13:30"));
+        SwCoaxSleep.Click += (_, _) => DimAlarmSliders();
+        SwCoaxLunch.Click += (_, _) => DimAlarmSliders();
+        SleepSlider.ValueChanged += (_, _) => ShowAlarmTags();
+        LunchSlider.ValueChanged += (_, _) => ShowAlarmTags();
         // 「跟随 Agent 一起启动」是 start_hidden 反过来：开 = 不先收着（2026-11-16）
         SwStartHidden.Click += (_, _) => { Touch("start_hidden"); Queue("start_hidden", SwStartHidden.IsChecked != true); };
 
@@ -421,6 +436,36 @@ public partial class MainWindow : Window
     private static string SecondsText(int seconds) => seconds < 60 ? $"{seconds} 秒" : seconds % 60 == 0 ? $"{seconds / 60} 分钟" : $"{seconds / 60} 分 {seconds % 60} 秒";
 
     private const double ThumbRadius = 9; // 和 App.xaml 里 SliderDot 的半径一致：圆钮中心只走到两头各缩进 9 的地方
+
+    private static string ClockText(int minutes) { minutes = ((minutes % 1440) + 1440) % 1440; return $"{minutes / 60:00}:{minutes % 60:00}"; }
+    private static string SleepText(double step) => ClockText(22 * 60 + (int)Math.Round(step) * 15);
+    private static string LunchText(double step) => ClockText(11 * 60 + (int)Math.Round(step) * 15);
+    // "00:30" → 滑块第几档；读不出来就用默认的那一档
+    private static double ClockStep(string text, int from, int max, double fallback)
+    {
+        var parts = text.Split(':');
+        if (parts.Length != 2 || !int.TryParse(parts[0], out var h) || !int.TryParse(parts[1], out var m)) return fallback;
+        int offset = ((h * 60 + m - from) % 1440 + 1440) % 1440;
+        return offset % 15 == 0 && offset / 15 <= max ? offset / 15 : fallback;
+    }
+    // 提醒开关关着时，下面的时间滑块变淡，免得以为调了就会提醒
+    private void DimAlarmSliders()
+    {
+        SleepSliderBox.Opacity = SwCoaxSleep.IsChecked == true ? 1 : 0.45;
+        LunchSliderBox.Opacity = SwCoaxLunch.IsChecked == true ? 1 : 0.45;
+        ShowAlarmTags();
+    }
+
+    // 两个提醒折叠起来时标题右边的小字：开着写“00:30 起”/“11:30”，关着写“已关闭”；和“随音乐摇摆”一样淡入淡出
+    private void ShowAlarmTags()
+    {
+        bool animate = IsLoaded && danceTags.ContainsKey("sleep.on");
+        bool sleep = SwCoaxSleep.IsChecked == true, lunch = SwCoaxLunch.IsChecked == true;
+        SetDanceTag("sleep.on", sleep, lit: true, animate, SleepTags, SleepText(SleepSlider.Value) + " 起");
+        SetDanceTag("sleep.off", !sleep, lit: false, animate, SleepTags, "已关闭");
+        SetDanceTag("lunch.on", lunch, lit: true, animate, LunchTags, LunchText(LunchSlider.Value));
+        SetDanceTag("lunch.off", !lunch, lit: false, animate, LunchTags, "已关闭");
+    }
 
     private void SetupSlider(Slider slider, Grid marks, TextBlock readout, Func<double, string> text, params (double Value, string Label)[] points)
     {
@@ -781,6 +826,7 @@ public partial class MainWindow : Window
         public required TranslateTransform Shift;
         public required ScaleTransform DotScale;
         public System.Windows.Media.Effects.DropShadowEffect? Glow;
+        public required TextBlock Label;
         public bool? On;
     }
     private readonly Dictionary<string, DanceTag> danceTags = [];
@@ -796,8 +842,11 @@ public partial class MainWindow : Window
         SetDanceTag("已关闭", !apps && !browser, lit: false, animate);
     }
 
-    private void SetDanceTag(string name, bool on, bool lit, bool animate)
+    // host / text 不给就是“随音乐摇摆”那一排，字就是 name；提醒那两排用 name 当键、text 当显示的字（字会跟着滑块变）
+    private void SetDanceTag(string name, bool on, bool lit, bool animate, Panel? host = null, string? text = null)
     {
+        host ??= DanceTags;
+        text ??= name;
         if (!danceTags.TryGetValue(name, out var tag))
         {
             var color = lit ? Color.FromRgb(0x6F, 0xE0, 0xB0) : Color.FromRgb(0x5A, 0x6A, 0x99);
@@ -809,10 +858,23 @@ public partial class MainWindow : Window
             var shift = new TranslateTransform();
             var inner = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(GlowPad, GlowPad, 10, GlowPad), RenderTransform = shift }; // 四周留出光晕的位置，外框再用负边距抵掉，排版不变
             inner.Children.Add(dot);
-            inner.Children.Add(new TextBlock { Text = name, Style = (Style)FindResource("Caption"), VerticalAlignment = VerticalAlignment.Center });
+            var label = new TextBlock { Text = text, Style = (Style)FindResource("Caption"), VerticalAlignment = VerticalAlignment.Center };
+            inner.Children.Add(label);
             var box = new Border { Child = inner, ClipToBounds = true, Margin = new Thickness(-GlowPad, -GlowPad, 0, -GlowPad), VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left };
-            DanceTags.Children.Add(box);
-            tag = danceTags[name] = new DanceTag { Box = box, Inner = inner, Shift = shift, DotScale = dotScale, Glow = glow };
+            host.Children.Add(box);
+            tag = danceTags[name] = new DanceTag { Box = box, Inner = inner, Shift = shift, DotScale = dotScale, Glow = glow, Label = label };
+        }
+        if (tag.Label.Text != text)
+        {
+            // 字变了（拖滑块）：换字，亮着的话外框宽度跟着平滑变
+            tag.Label.Text = text;
+            if (tag.On == true)
+            {
+                tag.Inner.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                double to = tag.Inner.DesiredSize.Width;
+                if (animate) tag.Box.BeginAnimation(WidthProperty, new DoubleAnimation(to, TimeSpan.FromMilliseconds(220)) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
+                else { tag.Box.BeginAnimation(WidthProperty, null); tag.Box.Width = to; }
+            }
         }
         if (tag.On == on) return;
         bool first = tag.On is null;
@@ -966,6 +1028,9 @@ public partial class MainWindow : Window
             if (Fresh("keep_on_screen")) SwKeepOn.IsChecked = B("keep_on_screen");
             if (Fresh("coax_sleep")) SwCoaxSleep.IsChecked = B("coax_sleep");
             if (Fresh("coax_lunch")) SwCoaxLunch.IsChecked = B("coax_lunch");
+            if (Fresh("sleep_at")) SleepSlider.Value = ClockStep(T("sleep_at"), 22 * 60, 16, 10);
+            if (Fresh("lunch_at")) LunchSlider.Value = ClockStep(T("lunch_at"), 11 * 60, 10, 2);
+            DimAlarmSliders();
             if (!dressBuilt) { var all = A("clothes").Concat(A("accessories")).ToArray(); if (all.Length > 0) BuildDress(all); }
             var wearing = A("wearing");
             foreach (var (label, chip) in chips) if (Fresh("dress:" + label)) chip.IsChecked = wearing.Contains(label);

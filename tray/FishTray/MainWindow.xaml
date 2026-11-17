@@ -280,14 +280,48 @@
                                     <TextBlock Text="拖到屏幕边弹回来" VerticalAlignment="Center"/>
                                     <ToggleButton x:Name="SwKeepOn" Style="{StaticResource Switch}" HorizontalAlignment="Right"/>
                                 </Grid>
-                                <Grid Margin="0,8">
-                                    <TextBlock Text="哄睡提醒（00:30 起）" VerticalAlignment="Center"/>
-                                    <ToggleButton x:Name="SwCoaxSleep" Style="{StaticResource Switch}" HorizontalAlignment="Right"/>
-                                </Grid>
-                                <Grid Margin="0,8">
-                                    <TextBlock Text="午饭提醒（11:30）" VerticalAlignment="Center"/>
-                                    <ToggleButton x:Name="SwCoaxLunch" Style="{StaticResource Switch}" HorizontalAlignment="Right"/>
-                                </Grid>
+                                <!-- 睡觉提醒：默认折叠，标题右边写着几点（关着写“已关闭”）；点开是开关和时间滑块（2026-11-18） -->
+                                <ToggleButton x:Name="SleepFold" Style="{StaticResource SubFold}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="睡觉提醒" VerticalAlignment="Center"/>
+                                        <StackPanel x:Name="SleepTags" Orientation="Horizontal" VerticalAlignment="Center" Margin="10,2,0,0"/>
+                                    </StackPanel>
+                                </ToggleButton>
+                                <StackPanel x:Name="SleepPanel" Visibility="Collapsed" Margin="14,0,0,4">
+                                    <Grid Margin="0,6">
+                                        <TextBlock Text="开启睡觉提醒" VerticalAlignment="Center" Foreground="{StaticResource SubBrush}"/>
+                                        <ToggleButton x:Name="SwCoaxSleep" Style="{StaticResource Switch}" HorizontalAlignment="Right"/>
+                                    </Grid>
+                                    <StackPanel x:Name="SleepSliderBox" Margin="0,4,0,4">
+                                        <Grid>
+                                            <TextBlock Text="几点开始提醒" Style="{StaticResource Caption}"/>
+                                            <TextBlock x:Name="SleepSliderValue" Text="" HorizontalAlignment="Right" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}"/>
+                                        </Grid>
+                                        <Slider x:Name="SleepSlider" Style="{StaticResource StarSlider}" Minimum="0" Maximum="16" Value="10" SmallChange="1" LargeChange="1" TickFrequency="1" IsSnapToTickEnabled="True" Margin="0,4,0,0"/>
+                                        <Grid x:Name="SleepSliderMarks" Height="18"/>
+                                    </StackPanel>
+                                </StackPanel>
+                                <!-- 午饭提醒：默认折叠，标题右边写着几点（关着写“已关闭”）；点开是开关和时间滑块（2026-11-18） -->
+                                <ToggleButton x:Name="LunchFold" Style="{StaticResource SubFold}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="午饭提醒" VerticalAlignment="Center"/>
+                                        <StackPanel x:Name="LunchTags" Orientation="Horizontal" VerticalAlignment="Center" Margin="10,2,0,0"/>
+                                    </StackPanel>
+                                </ToggleButton>
+                                <StackPanel x:Name="LunchPanel" Visibility="Collapsed" Margin="14,0,0,4">
+                                    <Grid Margin="0,6">
+                                        <TextBlock Text="开启午饭提醒" VerticalAlignment="Center" Foreground="{StaticResource SubBrush}"/>
+                                        <ToggleButton x:Name="SwCoaxLunch" Style="{StaticResource Switch}" HorizontalAlignment="Right"/>
+                                    </Grid>
+                                    <StackPanel x:Name="LunchSliderBox" Margin="0,4,0,4">
+                                        <Grid>
+                                            <TextBlock Text="几点提醒" Style="{StaticResource Caption}"/>
+                                            <TextBlock x:Name="LunchSliderValue" Text="" HorizontalAlignment="Right" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}"/>
+                                        </Grid>
+                                        <Slider x:Name="LunchSlider" Style="{StaticResource StarSlider}" Minimum="0" Maximum="10" Value="2" SmallChange="1" LargeChange="1" TickFrequency="1" IsSnapToTickEnabled="True" Margin="0,4,0,0"/>
+                                        <Grid x:Name="LunchSliderMarks" Height="18"/>
+                                    </StackPanel>
+                                </StackPanel>
                                 <Grid Margin="0,8">
                                     <TextBlock Text="在任务栏显示面板" VerticalAlignment="Center"/>
                                     <ToggleButton x:Name="SwTaskbar" Style="{StaticResource Switch}" HorizontalAlignment="Right"/>
