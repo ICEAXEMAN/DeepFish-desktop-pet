@@ -146,7 +146,7 @@ internal sealed partial class PetWindow : Window
         bubble = new BubbleWindow(this, () => Height * Shape.HeadTop) { RecordAs = test ? null : "speech" };
         bubble.Quiet = test;
         bubble.Scale = settings.BubbleScale;
-        mutter = new BubbleWindow(this, () => Height * Shape.HeadTop) { Scale = 0.85, RecordAs = test ? null : "mutter" };
+        mutter = new BubbleWindow(this, () => Height * Shape.HeadTop) { Scale = settings.BubbleScale, RecordAs = test ? null : "mutter" }; // 嘀咕气泡跟大气泡一样大，跟着气泡大小设置走（2026-11-18）
         mutter.Quiet = test;
         LoadMutterFile();
         LoadSkits();
@@ -222,7 +222,7 @@ internal sealed partial class PetWindow : Window
             dpiScale = dpi.DpiScaleX, supersample = Recorder.Boost, windowDip = new { width = Width, height = Height },
             shape = settings.Shape, scale = settings.Scale, texScale = settings.TexScale,
             bubbleTip = new { x = Math.Round(Width / 2 * k, 1), y = Math.Round((Height * Shape.HeadTop + 6) * k, 1) },
-            bubbleStyle = new { scale = settings.BubbleScale, mutterScale = 0.85, font = "Microsoft YaHei UI", fontSizeDip = 15, lineHeightDip = 22, maxWidthDip = 300,
+            bubbleStyle = new { scale = settings.BubbleScale, mutterScale = settings.BubbleScale, font = "Microsoft YaHei UI", fontSizeDip = 15, lineHeightDip = 22, maxWidthDip = 300,
                 padding = new[] { 18, 14, 14, 14 + Bubble.PointerHeight }, cornerRadius = 24, border = 1.5, borderColor = "#506098", background = "#FFFBF4", textColor = "#323854", pointerHalfWidth = 8, pointerHeight = Bubble.PointerHeight },
         };
     }
@@ -414,7 +414,8 @@ internal sealed partial class PetWindow : Window
     {
         await Task.Delay(600); // 等出场淡入、站稳
         if (exiting || standby || hiding) return;
-        SpeakAlarmBubbles(AlarmLine($"哄睡{stage}"));
+        var now = DateTime.Now;
+        SpeakAlarmBubbles(AlarmLine($"哄睡{stage}").Replace("{时间}", Alarms.Spoken(now.Hour, now.Minute)));
     }
 
     // 演哄睡前记下原来的体型、大小、位置，演完归位用。
@@ -1372,15 +1373,16 @@ internal sealed partial class PetWindow : Window
         var opened = new TaskCompletionSource();
         void Start(object? sender, EventArgs e)
         {
-            if (opened.Task.IsCompleted) return;
+            // 先摘订阅再判断：250ms 兜底已经放行时，这个事件还会来，不能每句都留一个处理器在事件上（2026-11-18 修）。
             voicePlayer.MediaOpened -= Start;
+            if (opened.Task.IsCompleted) return;
             opened.TrySetResult();
         }
         voicePlayer.MediaOpened += Start;
-        // 兜底：文件坏了或事件没来，也照样开口
-        _ = Task.Delay(250, token).ContinueWith(_ => opened.TrySetResult(), TaskScheduler.Default);
+        // 兜底：文件坏了或事件没来，也照样开口。不带 token：请求取消了也要让这里完成，不能把 await 挂死。
+        _ = Task.Delay(250).ContinueWith(_ => opened.TrySetResult(), TaskScheduler.Default);
         try { await opened.Task; } catch (TaskCanceledException) { return; }
-        if (exiting) return;
+        if (exiting || token.IsCancellationRequested) return;
         try { voicePlayer.Play(); } catch { /* 文件坏了就只打字 */ }
         SayLine(text, seconds > 0 ? seconds : null);
         await WaitForLine(token);
@@ -1651,7 +1653,7 @@ internal sealed partial class PetWindow : Window
                 }
                 if (args.TryGetProperty("bubble_scale", out var bubbleScale) && bubbleScale.TryGetDouble(out var bubbleSize))
                 {
-                    settings.BubbleScale = Math.Clamp(bubbleSize, .5, 2); bubble.Scale = settings.BubbleScale;
+                    settings.BubbleScale = Math.Clamp(bubbleSize, .5, 2); bubble.Scale = settings.BubbleScale; mutter.Scale = settings.BubbleScale;
                 }
                 if (args.TryGetProperty("bubble_seconds", out var stay) && stay.TryGetInt32(out var stays))
                 {
@@ -1662,19 +1664,17 @@ internal sealed partial class PetWindow : Window
                     settings.VoiceEnabled = voiceOn.GetBoolean();
                     if (!settings.VoiceEnabled)
                     {
-                        // 语音总开关：所有声音静音，同时把实时语音/开机自动启动一起关掉，并把后台 GPT-SoVITS 停掉。
-                        settings.TtsEnabled = false;
-                        settings.TtsAutostart = false;
+                        // 语音总开关：所有声音先停掉；实时语音开着的，顺手停掉后台 GPT-SoVITS 省显存。
+                        // 但不去改 tts_enabled / tts_autostart：那是用户自己的设置，重新打开总开关时要能恢复。
                         StopVoice();
-                        Tts.Stop(settings);
+                        if (settings.TtsEnabled) Tts.Stop(settings);
                     }
                     else
                     {
-                        // 打开总开关：恢复实时语音和自动启动，并让后台 GPT-SoVITS 起来（有服务目录时）。
-                        settings.TtsEnabled = true;
-                        settings.TtsAutostart = true;
+                        // 打开总开关只恢复预录音量。实时语音要不要开仍由 tts_enabled（控制台里同意过）决定，
+                        // 不在总开关里顺手打开，更不偷偷拉起 GPT-SoVITS（2026-11-18 修）。
                         voicePlayer.Volume = settings.Volume * VoiceGain;
-                        _ = Tts.Warm(settings); // 先启动服务并预热一句，之后实时语音才能马上生成
+                        if (settings.TtsEnabled) _ = Tts.Warm(settings); // 已经开着实时语音的，才提前预热
                     }
                 }
                 if (args.TryGetProperty("volume", out var volume) && volume.TryGetDouble(out var level))
@@ -1732,6 +1732,13 @@ internal sealed partial class PetWindow : Window
                 }
                 if (args.TryGetProperty("coax_sleep", out var sleep) && sleep.ValueKind is JsonValueKind.True or JsonValueKind.False) settings.CoaxSleep = sleep.GetBoolean();
                 if (args.TryGetProperty("coax_lunch", out var lunch) && lunch.ValueKind is JsonValueKind.True or JsonValueKind.False) settings.CoaxLunch = lunch.GetBoolean();
+                // 两个提醒的时间（2026-11-18）："23:45" 这样，按 15 分钟对齐；不在范围里就报错，让 AI 跟用户说清楚
+                if (args.TryGetProperty("dance_strength", out var strength) && strength.ValueKind == JsonValueKind.String)
+                    settings.DanceStrength = Array.IndexOf(Dance.Strengths, strength.GetString()) >= 0 ? strength.GetString()! : throw new ArgumentException("dance_strength 只能是 soft（柔和）、normal（标准）、strong（激烈）。");
+                if (args.TryGetProperty("sleep_at", out var sleepAt) && sleepAt.ValueKind == JsonValueKind.String)
+                    settings.SleepAt = Alarms.SleepTime(sleepAt.GetString()) ?? throw new ArgumentException("sleep_at 写成 23:45 这样，只能在 22:00–02:00 之间（15 分钟一档）。");
+                if (args.TryGetProperty("lunch_at", out var lunchAt) && lunchAt.ValueKind == JsonValueKind.String)
+                    settings.LunchAt = Alarms.LunchTime(lunchAt.GetString()) ?? throw new ArgumentException("lunch_at 写成 12:00 这样，只能在 11:00–13:30 之间（15 分钟一档）。");
                 // 听到音乐就跳（本机加，2026-11-10）：关掉时顺手把耳朵也收起来，别白跑一个 PowerShell。
                 if (args.TryGetProperty("music_apps", out var apps) && apps.ValueKind == JsonValueKind.String) settings.MusicApps = (apps.GetString() ?? "").Trim();
         // 跟着音乐跳：这两个原本只在工具说明里写着、这里没接，改了不生效（本机修，2026-11-12）
@@ -1945,11 +1952,11 @@ internal sealed partial class PetWindow : Window
         voice_pack = settings.VoicePack, voice_count = voicePack?.Count ?? 0,
         tts_enabled = settings.TtsEnabled, tts_url = settings.TtsUrl, tts_speed = settings.TtsSpeed, tts_autostart = settings.TtsAutostart, tts_dir = settings.TtsDir,
         hide_on_fullscreen = settings.HideOnFullscreen, hidden_for_fullscreen = hiddenForFullscreen && !standby, hidden = standby, hiding, start_hidden = settings.StartHidden, keep_on_screen = settings.KeepOnScreen, follow_mouse = settings.FollowMouse,
-        check_updates = settings.CheckUpdates, coax_sleep = settings.CoaxSleep, coax_lunch = settings.CoaxLunch, birthday = settings.Birthday,
+        check_updates = settings.CheckUpdates, coax_sleep = settings.CoaxSleep, coax_lunch = settings.CoaxLunch, sleep_at = settings.SleepAt, lunch_at = settings.LunchAt, birthday = settings.Birthday,
         update = updates.Latest is { } found ? new { current = found.Current, latest = found.Latest, behind = found.Behind, changes = found.Changes, guide = found.Guide } : null,
         idle_seconds = settings.IdleSeconds, position = new { Left, Top }, saying = speech.IsSaying, reaction = behavior.Showing, trouble,
         // 跟着音乐跳（本机加，2026-11-10）：开关、认哪几类声音、这会儿跳没跳。
-        music_dance = settings.MusicDance, dance_music_apps = settings.DanceMusicApps, dance_browser = settings.DanceBrowser, music_apps = settings.MusicApps, dancing = Dancing,
+        music_dance = settings.MusicDance, dance_music_apps = settings.DanceMusicApps, dance_browser = settings.DanceBrowser, dance_strength = settings.DanceStrength, music_apps = settings.MusicApps, dancing = Dancing,
         context_chat = settings.ContextChat, // 桌面实况总开关（本机加，2026-11-12）：DSH 的插件读它决定要不要看她前台、要不要搭话
         clothes = Outfit.Clothes.Select(item => item.Label).ToArray(), accessories = Outfit.Accessories.Select(item => item.Label).ToArray(),
         overlays = body.Overlays.Except(poseOverlays).ToArray(), raw = panelRaw.ToArray(), hand = body.HandUp, held = body.HeldWords.ToArray(), // 托盘控制台用：脸上开着哪些表情、原版表情、手举着没有

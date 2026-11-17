@@ -100,9 +100,10 @@ internal static class Tts
             {
                 if (!line.Contains(":" + port + " ") || !line.Contains("LISTENING")) continue;
                 var fields = line.Trim().Split([' '], StringSplitOptions.RemoveEmptyEntries);
-                if (fields.Length < 5 || !int.TryParse(fields[^1], out var pid)) break;
+                if (fields.Length < 5 || !int.TryParse(fields[^1], out var pid)) continue;
                 using var target = System.Diagnostics.Process.GetProcessById(pid);
-                if (!target.ProcessName.StartsWith("python", StringComparison.OrdinalIgnoreCase)) break;
+                // IPv4 / IPv6 可能各有一行：不是 python 就接着看下一行，别直接停（2026-11-18 修）。
+                if (!target.ProcessName.StartsWith("python", StringComparison.OrdinalIgnoreCase)) continue;
                 target.Kill(true);
                 Places.Log($"实时语音关了，顺手停掉语音服务（PID {pid}）");
                 return;
@@ -169,12 +170,10 @@ internal static class Tts
     internal const string PromptJa = "わたくしへのご意見、ご要望などはこちらの意見欄にご記入ください。";
     // 第二套（冷静、沉稳）的参考和对应原文
     internal const string PromptCalm = "自信がないと言いますか、なんかよくわからないです。";
-    // 旧的中文参考：2026-11-11 起实时语音改成中文→日语翻译，不再直接用中文参考
-    internal const string PromptZh = "报告一个好消息，所有测试都过了";
+    // 旧的中文参考已经整套删掉（2026-11-17），这里不再留 PromptZh / RefZh：中文配音不再回退。
 
     internal static string RefJa => Path.Combine(Places.Root, "voice", "ref", "语音参考.wav");
     internal static string RefCalm => Path.Combine(Places.Root, "voice_calm", "ref", "语音参考.wav");
-    internal static string RefZh => Path.Combine(Places.Root, "voice", "ref", "zh_boot.wav");
 
     internal static string Cache => Path.Combine(Path.GetTempPath(), "fishpet-tts");
 

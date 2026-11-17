@@ -140,7 +140,17 @@ export function apply(ctx, config) {
     if (current && current.content !== was?.content) return ['步骤接续', { step: cleanName(current.content) }]
     return null
   }
+  // agent 已经销毁（会话被关掉、子 agent 结束）就别再让计时器补发事件（2026-11-18 修）：
+  // 以前只清 turn-stopping，异常销毁的 agent 会留下 timer，3 分钟后突然演一句“思考超时”。
+  function agentAlive(id) {
+    try {
+      const service = ctx.get?.('agents')
+      const list = service?.list?.() || service?.roots?.() || []
+      return list.some((a) => a.id === id)
+    } catch { return true }
+  }
   function briefDue(id) {
+    if (!agentAlive(id)) return
     const st = briefOfAgent(id)
     const news = planNews(st.spoken, st.plan)
     if (!news) return
@@ -159,11 +169,17 @@ export function apply(ctx, config) {
     if (!turnStart.has(id)) return
     const timers = thinkTimers.get(id) || []
     if (timers[1]) clearTimeout(timers[1])
-    timers[1] = setTimeout(() => { const t = thinkTimers.get(id); if (t) t[1] = null; void sendEvent('思考超时') }, THINK_TIMEOUT)
+    timers[1] = setTimeout(() => {
+      const t = thinkTimers.get(id)
+      if (t) t[1] = null
+      if (!agentAlive(id)) { clearThink(id); return }
+      void sendEvent('思考超时')
+    }, THINK_TIMEOUT)
     thinkTimers.set(id, timers)
   }
   function beat(callId, agentId, desc) {
     beats.delete(callId)
+    if (agentId && !agentAlive(agentId)) return
     const st = agentId ? briefOfAgent(agentId) : null
     const current = st?.turnPlan ? st.plan.find((p) => p.status === 'in_progress') : null
     const step = current ? cleanName(current.content) : desc
@@ -236,10 +252,11 @@ export function apply(ctx, config) {
         // 思考超时：3 分钟后这一轮还没结束就喊一声（只喊一次）；中途调用工具不再取消计时。又来一条新消息会重新计时，这一轮结束（turn-stopping）或出错才取消
         clearThink(agent.id)
         thinkTimers.set(agent.id, [
-          setTimeout(() => void sendEvent('思考一分钟'), THINK_LOAD),
+          setTimeout(() => { if (agentAlive(agent.id)) void sendEvent('思考一分钟') }, THINK_LOAD),
           setTimeout(() => {
             const t = thinkTimers.get(agent.id)
             if (t) t[1] = null
+            if (!agentAlive(agent.id)) { clearThink(agent.id); return }
             void sendEvent('思考超时')
           }, THINK_TIMEOUT),
         ])
@@ -287,7 +304,7 @@ export function apply(ctx, config) {
         }
       })
     })
-    disposers.set(agent.id, () => { turnStart.delete(agent.id); clearThink(agent.id); announced.delete(agent.id); dispose() })
+    disposers.set(agent.id, () => { turnStart.delete(agent.id); clearThink(agent.id); announced.delete(agent.id); briefs.delete(agent.id); dispose() })
     void log(`registered ${agent.id}`)
   }
 

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Windows.Threading;
 
@@ -121,15 +121,17 @@ internal sealed partial class PetWindow
         const string word = "摇摆一";
         // 这一句演多久跟着 BPM 走：一拍多长（Dance.Seconds）就演几拍，BPM 越高律动越快（用户要的，2026-11-10）。
         // ×2：频率减半；size 0.4：幅度减半（2026-11-10 用户要的）再少 20%（2026-11-12 用户要的）。
-        double wanted = Dance.Seconds(word, ears.Tempo) * 2;
-        double length = body.DanceToBeat(word, wanted, .4);
+        // 2026-11-18：幅度和放慢的倍数按「摇摆强度」走，柔和档就是上面说的 ×2、0.4。
+        var (size, stretch) = Dance.Strength(settings.DanceStrength);
+        double wanted = Dance.Seconds(word, ears.Tempo) * stretch;
+        double length = body.DanceToBeat(word, wanted, size);
         if (length <= 0) length = wanted;
         // 摇摆一最后正好回到正中（0），所以下一句等这一句演完再接，不会两条轨道叠在一起抢。
         danceNextAt = now.AddSeconds(Math.Clamp(length, .5, 24));
         if (now - danceLogAt > TimeSpan.FromSeconds(30))
         {
             danceLogAt = now;
-            Places.Log(FormattableString.Invariant($"跟着音乐跳：{word}（{ears.Source}）{length:0.0} 秒 响度 {beat.Level:0.00} 低音 {beat.Bass:0.00} 节拍 {ears.Tempo:0} BPM"));
+            Places.Log(FormattableString.Invariant($"跟着音乐跳：{word}（{ears.Source}）{length:0.0} 秒 强度 {settings.DanceStrength} 响度 {beat.Level:0.00} 低音 {beat.Bass:0.00} 节拍 {ears.Tempo:0} BPM"));
         }
     }
 

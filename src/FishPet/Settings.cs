@@ -47,6 +47,8 @@ internal sealed class Settings
     public string MusicApps { get; set; } = "cloudmusic,qqmusic,qqmusicclient,spotify,applemusic,itunes,music,kugou,kuwo,qishui,musicbee,foobar2000,aimp";
     // 听到电脑在放音乐就跟着跳（本机加，2026-11-10）：在 settings.json 里改成 false 就只放歌不跳舞。
     public bool MusicDance { get; set; } = true;
+    // 摇摆强度（2026-11-18）：soft 柔和（默认）、normal 标准、strong 激烈（Dance.cs）
+    public string DanceStrength { get; set; } = "soft";
     // 随音乐摇摆认哪些声音（合上游 2026-11-17）：音乐软件（上面 MusicApps，默认开）、浏览器网页（BrowserApps，默认关）。
     // 两个都关就等于 MusicDance 关；托盘里没有总开关了，只有这两个。
     public bool DanceMusicApps { get; set; } = true;
@@ -69,9 +71,12 @@ internal sealed class Settings
     public bool Welcomed { get; set; } = true;
     // Seconds between the small things she does by herself when nobody talks to her.
     public int IdleSeconds { get; set; } = 300;
-    // 到点叫人（本机加，2026-11-08）：按这台电脑的时钟，00:30 起四层哄睡、11:30 午饭提醒。默认关，托盘“更多”里能开。
+    // 到点叫人（本机加，2026-11-08）：按这台电脑的时钟，默认 00:30 起四层哄睡、11:30 午饭提醒（时间可调）。默认关，托盘“更多”里能开。
     public bool CoaxSleep { get; set; } = false;
     public bool CoaxLunch { get; set; } = false;
+    // 两个提醒几点开始（2026-11-18）：睡觉 22:00–02:00、午饭 11:00–13:30，15 分钟一档（Alarms.cs）
+    public string SleepAt { get; set; } = Alarms.DefaultSleepAt;
+    public string LunchAt { get; set; } = Alarms.DefaultLunchAt;
     // 用户的生日（MM-dd，比如 10-21）：那天她会说生日快乐、演生日小剧场（mutter.txt、skits.txt 里写着 @生日 的）。空着就没有。
     public string Birthday { get; set; } = "";
     // 待机自言自语：桌宠自己调大模型现编嘀咕。
@@ -110,7 +115,7 @@ internal sealed class Settings
         Scale = Math.Clamp(double.IsFinite(Scale) ? Scale : 1, .5, 2);
         TexScale = TexScale >= 1 ? 1 : TexScale >= 0.5 ? 0.5 : 0.25;
         BubbleScale = Math.Clamp(double.IsFinite(BubbleScale) && BubbleScale > 0 ? BubbleScale : 1, .5, 2);
-        Volume = Math.Clamp(double.IsFinite(Volume) ? Volume : .8, 0, 1);
+        Volume = Math.Clamp(double.IsFinite(Volume) ? Volume : 0.25, 0, 1);
         VoicePack = string.Equals(VoicePack, "calm", StringComparison.OrdinalIgnoreCase) ? "calm" : "second";
         TtsSpeed = Math.Clamp(double.IsFinite(TtsSpeed) ? TtsSpeed : .95, .7, 1.5);
         TtsUrl = string.IsNullOrWhiteSpace(TtsUrl) ? "http://127.0.0.1:9880" : TtsUrl.Trim();
@@ -119,6 +124,9 @@ internal sealed class Settings
         BrowserApps = (BrowserApps ?? "").Trim();
         BubbleSeconds = StayFor(BubbleSeconds);
         IdleSeconds = Math.Clamp(IdleSeconds, 15, 600);
+        DanceStrength = Dance.NormalStrength(DanceStrength);
+        SleepAt = Alarms.SleepTime(SleepAt) ?? Alarms.DefaultSleepAt;
+        LunchAt = Alarms.LunchTime(LunchAt) ?? Alarms.DefaultLunchAt;
         Birthday = Condition.NormalBirthday(Birthday) ?? "";
         MutterChance = Math.Clamp(double.IsFinite(MutterChance) ? MutterChance : 0.5, 0, 1);
         return this;

@@ -44,6 +44,7 @@ import re
 import shutil
 import time
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -99,8 +100,13 @@ def read_status(folder):
     # 状态没过期才返回（过期了就是观察器没在跑，里面的内容是旧的）
     try:
         status = json.loads((folder / "status.json").read_text(encoding="utf-8-sig"))
-        stamp = time.mktime(time.strptime(str(status["at"])[:19], "%Y-%m-%dT%H:%M:%S")) - time.timezone  # 插件写的是 UTC
-        return status if time.time() - stamp < STATUS_FRESH else None
+        # status["at"] 是 UTC（带 Z 或 +00:00）。以前用 mktime - time.timezone 换算，夏令时期间会差一小时，
+        # 状态会被误判成过期（或一直新鲜）；显式按 UTC 解析（2026-11-18 修）。
+        raw = str(status["at"]).strip().replace("Z", "+00:00")
+        at = datetime.fromisoformat(raw)
+        if at.tzinfo is None:
+            at = at.replace(tzinfo=timezone.utc)
+        return status if time.time() - at.timestamp() < STATUS_FRESH else None
     except Exception:
         return None
 
