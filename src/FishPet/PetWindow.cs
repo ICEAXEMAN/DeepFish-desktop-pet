@@ -134,7 +134,7 @@ internal sealed partial class PetWindow : Window
         bubble = new BubbleWindow(this, () => Height * Shape.HeadTop) { RecordAs = test ? null : "speech" };
         bubble.Quiet = test;
         bubble.Scale = settings.BubbleScale;
-        mutter = new BubbleWindow(this, () => Height * Shape.HeadTop) { Scale = 0.85, RecordAs = test ? null : "mutter" };
+        mutter = new BubbleWindow(this, () => Height * Shape.HeadTop) { Scale = settings.BubbleScale, RecordAs = test ? null : "mutter" }; // 嘀咕气泡跟大气泡一样大，跟着气泡大小设置走（原来写死 0.85，2026-11-18）
         mutter.Quiet = test;
         LoadMutterFile();
         LoadSkits();
@@ -206,7 +206,7 @@ internal sealed partial class PetWindow : Window
             dpiScale = dpi.DpiScaleX, supersample = Recorder.Boost, windowDip = new { width = Width, height = Height },
             shape = settings.Shape, scale = settings.Scale, texScale = settings.TexScale,
             bubbleTip = new { x = Math.Round(Width / 2 * k, 1), y = Math.Round((Height * Shape.HeadTop + 6) * k, 1) },
-            bubbleStyle = new { scale = settings.BubbleScale, mutterScale = 0.85, font = "Microsoft YaHei UI", fontSizeDip = 15, lineHeightDip = 22, maxWidthDip = 300,
+            bubbleStyle = new { scale = settings.BubbleScale, mutterScale = settings.BubbleScale, font = "Microsoft YaHei UI", fontSizeDip = 15, lineHeightDip = 22, maxWidthDip = 300,
                 padding = new[] { 18, 14, 14, 14 + Bubble.PointerHeight }, cornerRadius = 24, border = 1.5, borderColor = "#506098", background = "#FFFBF4", textColor = "#323854", pointerHalfWidth = 8, pointerHeight = Bubble.PointerHeight },
         };
     }
@@ -1497,7 +1497,7 @@ internal sealed partial class PetWindow : Window
                 }
                 if (args.TryGetProperty("bubble_scale", out var bubbleScale) && bubbleScale.TryGetDouble(out var bubbleSize))
                 {
-                    settings.BubbleScale = Math.Clamp(bubbleSize, .5, 2); bubble.Scale = settings.BubbleScale;
+                    settings.BubbleScale = Math.Clamp(bubbleSize, .5, 2); bubble.Scale = settings.BubbleScale; mutter.Scale = settings.BubbleScale;
                 }
                 if (args.TryGetProperty("bubble_seconds", out var stay) && stay.TryGetInt32(out var stays))
                 {

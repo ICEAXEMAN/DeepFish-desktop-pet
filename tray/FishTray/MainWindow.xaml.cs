@@ -57,7 +57,7 @@ public partial class MainWindow : Window
         public bool Pin { get; set; }
         public bool More { get; set; }
         public bool Dance { get; set; } // “随音乐摇摆”那一行展开着没有
-        public bool Taskbar { get; set; } // 在任务栏显示面板（默认关）：开了任务栏上有个按钮，面板有最小化键；点 X 仍是收回小托盘
+        public bool Taskbar { get; set; } = true; // 在任务栏显示面板（默认开，2026-11-18 起）：开了任务栏上有个按钮，面板有最小化键；点 X 仍是收回小托盘
 
         private static string File_ => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "ui.json"));
         internal static Ui Load()
@@ -126,7 +126,7 @@ public partial class MainWindow : Window
         SizeChanged += (_, _) => { if (!moved && IsVisible) Anchor(); else if (IsVisible) KeepOnScreen(); };
     }
 
-    // 在任务栏显示面板：开了才有任务栏按钮和最小化键；关着（默认）时和以前完全一样。
+    // 在任务栏显示面板：开了（默认）才有任务栏按钮和最小化键；关着时只在托盘里。
     private void ApplyTaskbar()
     {
         ShowInTaskbar = ui.Taskbar;
@@ -772,29 +772,169 @@ public partial class MainWindow : Window
     }
 
     // “随音乐摇摆”右边的小字：和顶上“· 在桌面上”一个样子，开着哪类就写哪类，都关着写“已关闭”
+    // 开关时小字不再整排重画，而是各自淡入淡出：出现时让出位置、轻轻滑进来、小圆点亮起来带一圈光；
+    // 消失时先淡掉再收起位置，旁边的字跟着平滑挪过去。只在状态真的变了才动，刷新时一样的就不动（2026-11-18）
+    private sealed class DanceTag
+    {
+        public required Border Box;          // 外框：动宽度，裁掉还没展开的部分
+        public required FrameworkElement Inner; // 圆点+字：动透明度和位移
+        public required TranslateTransform Shift;
+        public required ScaleTransform DotScale;
+        public System.Windows.Media.Effects.DropShadowEffect? Glow;
+        public bool? On;
+    }
+    private readonly Dictionary<string, DanceTag> danceTags = [];
+    // 外框要裁掉还没展开的部分，可小圆点的光晕比圆点大：四周各留这么多，光晕才不会被裁掉。收起时宽度停在这里（和左边的负边距正好抵掉）
+    private const double GlowPad = 9;
+
     private void ShowDanceTags()
     {
-        DanceTags.Children.Clear();
-        var on = new List<string>();
-        if (SwDanceApps.IsChecked == true) on.Add("音乐软件");
-        if (SwDanceBrowser.IsChecked == true) on.Add("浏览器");
-        bool none = on.Count == 0;
-        if (none) on.Add("已关闭");
-        for (int i = 0; i < on.Count; i++)
+        bool apps = SwDanceApps.IsChecked == true, browser = SwDanceBrowser.IsChecked == true;
+        bool animate = IsLoaded && danceTags.Count > 0;
+        SetDanceTag("音乐软件", apps, lit: true, animate);
+        SetDanceTag("浏览器", browser, lit: true, animate);
+        SetDanceTag("已关闭", !apps && !browser, lit: false, animate);
+    }
+
+    private void SetDanceTag(string name, bool on, bool lit, bool animate)
+    {
+        if (!danceTags.TryGetValue(name, out var tag))
         {
-            var dot = new System.Windows.Shapes.Ellipse { Width = 6, Height = 6, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(i == 0 ? 0 : 10, 1, 6, 0),
-                Fill = new SolidColorBrush(none ? Color.FromRgb(0x5A, 0x6A, 0x99) : Color.FromRgb(0x6F, 0xE0, 0xB0)) };
-            DanceTags.Children.Add(dot);
-            DanceTags.Children.Add(new TextBlock { Text = on[i], Style = (Style)FindResource("Caption"), VerticalAlignment = VerticalAlignment.Center });
+            var color = lit ? Color.FromRgb(0x6F, 0xE0, 0xB0) : Color.FromRgb(0x5A, 0x6A, 0x99);
+            var dotScale = new ScaleTransform(1, 1);
+            var dot = new System.Windows.Shapes.Ellipse { Width = 6, Height = 6, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 1, 6, 0),
+                Fill = new SolidColorBrush(color), RenderTransform = dotScale, RenderTransformOrigin = new Point(0.5, 0.5) };
+            System.Windows.Media.Effects.DropShadowEffect? glow = null;
+            if (lit) dot.Effect = glow = new System.Windows.Media.Effects.DropShadowEffect { Color = color, BlurRadius = 8, ShadowDepth = 0, Opacity = 0.55 };
+            var shift = new TranslateTransform();
+            var inner = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(GlowPad, GlowPad, 10, GlowPad), RenderTransform = shift }; // 四周留出光晕的位置，外框再用负边距抵掉，排版不变
+            inner.Children.Add(dot);
+            inner.Children.Add(new TextBlock { Text = name, Style = (Style)FindResource("Caption"), VerticalAlignment = VerticalAlignment.Center });
+            var box = new Border { Child = inner, ClipToBounds = true, Margin = new Thickness(-GlowPad, -GlowPad, 0, -GlowPad), VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left };
+            DanceTags.Children.Add(box);
+            tag = danceTags[name] = new DanceTag { Box = box, Inner = inner, Shift = shift, DotScale = dotScale, Glow = glow };
+        }
+        if (tag.On == on) return;
+        bool first = tag.On is null;
+        tag.On = on;
+
+        tag.Inner.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        double full = tag.Inner.DesiredSize.Width;
+        if (!animate || first)
+        {
+            foreach (var (o, p) in new (Animatable, DependencyProperty)[] { (tag.Shift, TranslateTransform.XProperty), (tag.DotScale, ScaleTransform.ScaleXProperty), (tag.DotScale, ScaleTransform.ScaleYProperty) }) o.BeginAnimation(p, null);
+            tag.Box.BeginAnimation(WidthProperty, null); tag.Inner.BeginAnimation(OpacityProperty, null);
+            tag.Box.Width = on ? full : GlowPad; tag.Inner.Opacity = on ? 1 : 0; tag.Shift.X = 0; tag.DotScale.ScaleX = tag.DotScale.ScaleY = 1;
+            return;
+        }
+
+        static TimeSpan Ms(double ms) => TimeSpan.FromMilliseconds(ms);
+        var smooth = new QuinticEase { EasingMode = EasingMode.EaseOut };
+        var soft = new CubicEase { EasingMode = EasingMode.EaseInOut };
+        // 不写 From：开关连点、动画做到一半时，从当前的样子接着往回走，不会跳
+        if (on)
+        {
+            // 已经完全淡掉了，才从左边一点、小圆点开始；还没淡完就被点回来的，从当前的样子接着往回走
+            if (tag.Inner.Opacity < 0.05)
+            {
+                tag.Shift.BeginAnimation(TranslateTransform.XProperty, null); tag.Shift.X = -8;
+                tag.DotScale.BeginAnimation(ScaleTransform.ScaleXProperty, null); tag.DotScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+                tag.DotScale.ScaleX = tag.DotScale.ScaleY = 0.2;
+            }
+            tag.Box.BeginAnimation(WidthProperty, new DoubleAnimation(full, Ms(380)) { EasingFunction = smooth });
+            tag.Inner.BeginAnimation(OpacityProperty, new DoubleAnimation(1, Ms(320)) { BeginTime = Ms(90), EasingFunction = soft });
+            tag.Shift.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(0, Ms(420)) { BeginTime = Ms(60), EasingFunction = smooth });
+            // 圆点“啵”地亮起来：从小放大、稍微冲过头再回来，光晕先亮一下再落到平常的亮度
+            var pop = new DoubleAnimation(1, Ms(460)) { BeginTime = Ms(120), EasingFunction = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.9 } };
+            tag.DotScale.BeginAnimation(ScaleTransform.ScaleXProperty, pop);
+            tag.DotScale.BeginAnimation(ScaleTransform.ScaleYProperty, pop);
+            if (tag.Glow is { } glow)
+            {
+                var flare = new DoubleAnimationUsingKeyFrames { BeginTime = Ms(120) };
+                flare.KeyFrames.Add(new EasingDoubleKeyFrame(0, KeyTime.FromTimeSpan(Ms(0))));
+                flare.KeyFrames.Add(new EasingDoubleKeyFrame(1, KeyTime.FromTimeSpan(Ms(260)), soft));
+                flare.KeyFrames.Add(new EasingDoubleKeyFrame(0.55, KeyTime.FromTimeSpan(Ms(900)), soft));
+                glow.BeginAnimation(System.Windows.Media.Effects.DropShadowEffect.OpacityProperty, flare);
+            }
+        }
+        else
+        {
+            tag.Inner.BeginAnimation(OpacityProperty, new DoubleAnimation(0, Ms(200)) { EasingFunction = soft });
+            tag.Shift.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(6, Ms(240)) { EasingFunction = soft });
+            var shrink = new DoubleAnimation(0.4, Ms(220)) { EasingFunction = soft };
+            tag.DotScale.BeginAnimation(ScaleTransform.ScaleXProperty, shrink);
+            tag.DotScale.BeginAnimation(ScaleTransform.ScaleYProperty, shrink);
+            tag.Box.BeginAnimation(WidthProperty, new DoubleAnimation(GlowPad, Ms(340)) { BeginTime = Ms(110), EasingFunction = smooth });
         }
     }
 
     private void SetStatus(bool? hidden, string text)
     {
         Hidden = hidden is null ? null : hidden;
-        StatusText.Text = text;
-        StatusDot.Fill = new SolidColorBrush(hidden is null ? Color.FromRgb(0x5A, 0x6A, 0x99) : hidden == true ? Color.FromRgb(0x7C, 0xC4, 0xFF) : Color.FromRgb(0x6F, 0xE0, 0xB0));
+        ShowStatus(hidden is null ? Color.FromRgb(0x5A, 0x6A, 0x99) : hidden == true ? Color.FromRgb(0x7C, 0xC4, 0xFF) : Color.FromRgb(0x6F, 0xE0, 0xB0), text, lit: hidden is not null);
         if (hidden is null) { ShowSwitch.IsEnabled = false; }
+    }
+
+    // 名字下面那行状态（· 在桌面上 / 收起着 / 连不上）：换的时候旧字往右淡出、新字从左边淡入，
+    // 小圆点平滑换颜色、啵一下，亮着的（蓝、绿）带一圈光；和“随音乐摇摆”的小字一个手感。状态没变就不动（2026-11-18）
+    private SolidColorBrush? statusBrush;
+    private System.Windows.Media.Effects.DropShadowEffect? statusGlow;
+    private readonly TranslateTransform statusShift = new();
+    private readonly ScaleTransform statusDotScale = new(1, 1);
+    private string? statusShown;      // 现在字面上写的
+    private string? statusWant;       // 最后一次要换成的（淡出途中又变了，就换成最新的）
+    private Color statusColor;
+
+    private void ShowStatus(Color color, string text, bool lit)
+    {
+        static TimeSpan Ms(double ms) => TimeSpan.FromMilliseconds(ms);
+        var soft = new CubicEase { EasingMode = EasingMode.EaseInOut };
+        var smooth = new QuinticEase { EasingMode = EasingMode.EaseOut };
+        if (statusBrush is null)
+        {
+            // 第一次：照原样摆上，不做动画
+            StatusDot.Fill = statusBrush = new SolidColorBrush(color);
+            StatusDot.Effect = statusGlow = new System.Windows.Media.Effects.DropShadowEffect { Color = color, BlurRadius = 8, ShadowDepth = 0, Opacity = lit ? 0.55 : 0 };
+            StatusDot.RenderTransform = statusDotScale; StatusDot.RenderTransformOrigin = new Point(0.5, 0.5);
+            StatusText.RenderTransform = statusShift;
+            StatusText.Text = statusShown = statusWant = text; statusColor = color;
+            return;
+        }
+        if (text == statusWant && color == statusColor) return;
+        bool recolor = color != statusColor;
+        statusColor = color;
+
+        if (recolor)
+        {
+            statusBrush.BeginAnimation(SolidColorBrush.ColorProperty, new ColorAnimation(color, Ms(420)) { EasingFunction = soft });
+            statusGlow!.BeginAnimation(System.Windows.Media.Effects.DropShadowEffect.ColorProperty, new ColorAnimation(color, Ms(420)) { EasingFunction = soft });
+            var flare = new DoubleAnimationUsingKeyFrames();
+            flare.KeyFrames.Add(new EasingDoubleKeyFrame(lit ? 1 : 0.3, KeyTime.FromTimeSpan(Ms(260)), soft));
+            flare.KeyFrames.Add(new EasingDoubleKeyFrame(lit ? 0.55 : 0, KeyTime.FromTimeSpan(Ms(900)), soft));
+            statusGlow.BeginAnimation(System.Windows.Media.Effects.DropShadowEffect.OpacityProperty, flare);
+            var pop = new DoubleAnimationUsingKeyFrames();
+            pop.KeyFrames.Add(new EasingDoubleKeyFrame(0.45, KeyTime.FromTimeSpan(Ms(160)), soft));
+            pop.KeyFrames.Add(new EasingDoubleKeyFrame(1, KeyTime.FromTimeSpan(Ms(620)), new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.9 }));
+            statusDotScale.BeginAnimation(ScaleTransform.ScaleXProperty, pop);
+            statusDotScale.BeginAnimation(ScaleTransform.ScaleYProperty, pop);
+        }
+
+        bool fadingOut = statusWant != statusShown;
+        statusWant = text;
+        if (text == statusShown && !fadingOut) return;
+        if (fadingOut) return; // 正在淡出：淡完会换成 statusWant（最新的）
+
+        // 旧字往右淡出，淡完换字，新字从左边淡入
+        var fade = new DoubleAnimation(0, Ms(170)) { EasingFunction = soft };
+        fade.Completed += (_, _) =>
+        {
+            StatusText.Text = statusShown = statusWant;
+            statusShift.BeginAnimation(TranslateTransform.XProperty, null); statusShift.X = -8;
+            statusShift.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(0, Ms(420)) { EasingFunction = smooth });
+            StatusText.BeginAnimation(OpacityProperty, new DoubleAnimation(1, Ms(320)) { EasingFunction = soft });
+        };
+        StatusText.BeginAnimation(OpacityProperty, fade);
+        statusShift.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(6, Ms(170)) { EasingFunction = soft });
     }
 
     private void Apply(JsonElement s)
