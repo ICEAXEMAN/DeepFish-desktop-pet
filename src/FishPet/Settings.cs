@@ -30,6 +30,8 @@ internal sealed class Settings
     public string MusicApps { get; set; } = "cloudmusic,qqmusic,qqmusicclient,spotify,applemusic,itunes,music,kugou,kuwo,qishui,musicbee,foobar2000,aimp";
     // 听到电脑在放音乐就跟着跳（本机加，2026-11-10）：在 settings.json 里改成 false 就只放歌不跳舞。
     public bool MusicDance { get; set; } = true;
+    // 摇摆强度（2026-11-18）：soft 柔和（默认）、normal 标准、strong 激烈（Dance.cs）
+    public string DanceStrength { get; set; } = "soft";
     // 随音乐摇摆认哪些声音（2026-11-17 用户要的）：音乐软件（上面的 MusicApps，默认开）、浏览器网页（BrowserApps，默认关）。
     // 两个都关就等于 MusicDance 关；托盘里没有总开关了，只有这两个。
     public bool DanceMusicApps { get; set; } = true;
@@ -95,6 +97,7 @@ internal sealed class Settings
         BrowserApps = (BrowserApps ?? "").Trim();
         BubbleSeconds = StayFor(BubbleSeconds);
         IdleSeconds = Math.Clamp(IdleSeconds, 15, 600);
+        DanceStrength = Dance.NormalStrength(DanceStrength);
         SleepAt = Alarms.SleepTime(SleepAt) ?? Alarms.DefaultSleepAt;
         LunchAt = Alarms.LunchTime(LunchAt) ?? Alarms.DefaultLunchAt;
         Birthday = Condition.NormalBirthday(Birthday) ?? "";

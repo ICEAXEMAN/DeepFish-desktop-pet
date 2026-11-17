@@ -921,6 +921,9 @@ void VerifyDance()
     Check(Dance.BeatSeconds(400) >= .32 && Dance.BeatSeconds(10) <= 1.5, "太快太慢都按边界走");
 
     // 每一句的拍数：摇摆一 12、摇摆二 6、慢摇 3；BPM 高的时候同一支舞更短。
+    Check(Dance.Strength("soft") == (.4, 2) && Dance.Strength(null) == (.4, 2) && Dance.Strength("乱写") == (.4, 2), "摇摆强度默认柔和，和以前一样");
+    Check(Dance.Strength("normal").Size > Dance.Strength("soft").Size && Dance.Strength("strong").Size > Dance.Strength("normal").Size, "越猛幅度越大");
+    Check(Dance.Strength("normal").Stretch < Dance.Strength("soft").Stretch && Dance.Strength("strong").Stretch < Dance.Strength("normal").Stretch, "越猛一句越短");
     Check(Dance.Beats("摇摆一") == 12 && Dance.Beats("摇摆二") == 6 && Dance.Beats("慢摇") == 3, "每个舞步走多少拍");
     Check(Dance.Seconds("摇摆二", 150) < Dance.Seconds("摇摆二", 80), "同一支舞，BPM 高的一句更短");
 

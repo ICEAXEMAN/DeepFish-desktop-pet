@@ -23,11 +23,13 @@ public partial class MainWindow : Window
     private static readonly string[] StayNames = ["自动", "5 秒", "10 秒", "20 秒", "60 秒", "常驻"];
     private static readonly double[] QualityValues = [0.25, 0.5, 1];
     private static readonly string[] QualityNames = ["流畅", "标准", "高清"];
+    private static readonly string[] StrengthValues = ["soft", "normal", "strong"];
+    private static readonly string[] StrengthNames = ["柔和", "标准", "激烈"];
 
     private bool loading;
     private bool moved;
     private bool dressBuilt;
-    private Seg shapeSeg = null!, fpsSeg = null!, staySeg = null!, qualitySeg = null!;
+    private Seg shapeSeg = null!, fpsSeg = null!, staySeg = null!, qualitySeg = null!, strengthSeg = null!;
     private readonly Dictionary<string, ToggleButton> chips = new();
     private readonly Dictionary<string, object> pending = new();
     private readonly Dictionary<string, DateTime> touched = new();
@@ -102,6 +104,7 @@ public partial class MainWindow : Window
         fpsSeg = MakeSeg(FpsHost, FpsValues.Select(v => v.ToString()).ToArray(), "fps", i => Queue("fps", FpsValues[i]));
         staySeg = MakeSeg(StayHost, StayNames, "stay", i => Queue("bubble_seconds", StayValues[i]));
         qualitySeg = MakeSeg(QualityHost, QualityNames, "quality", i => Queue("tex_scale", QualityValues[i]));
+        strengthSeg = MakeSeg(StrengthHost, StrengthNames, "dance_strength", i => Queue("dance_strength", StrengthValues[i])); // 摇摆强度（2026-11-18）
         BuildSections();
 
         flush.Tick += async (_, _) => await Flush();
@@ -1020,6 +1023,7 @@ public partial class MainWindow : Window
             if (Fresh("bubble_scale")) BubbleSlider.Value = Math.Clamp(D("bubble_scale", 1), 0.5, 2);
             if (Fresh("stay")) SetSeg(staySeg, Array.IndexOf(StayValues, (int)D("bubble_seconds")));
             if (Fresh("quality")) SetSeg(qualitySeg, Math.Max(0, Array.IndexOf(QualityValues, D("tex_scale", 1))));
+            if (Fresh("dance_strength")) SetSeg(strengthSeg, Math.Max(0, Array.IndexOf(StrengthValues, T("dance_strength"))));
             if (Fresh("dance_music_apps")) SwDanceApps.IsChecked = B("music_dance") && B("dance_music_apps");
             if (Fresh("dance_browser")) SwDanceBrowser.IsChecked = B("music_dance") && B("dance_browser");
             ShowDanceTags();

@@ -1526,6 +1526,8 @@ internal sealed partial class PetWindow : Window
                 if (args.TryGetProperty("coax_sleep", out var sleep) && sleep.ValueKind is JsonValueKind.True or JsonValueKind.False) settings.CoaxSleep = sleep.GetBoolean();
                 if (args.TryGetProperty("coax_lunch", out var lunch) && lunch.ValueKind is JsonValueKind.True or JsonValueKind.False) settings.CoaxLunch = lunch.GetBoolean();
                 // 两个提醒的时间（2026-11-18）："23:45" 这样，按 15 分钟对齐；不在范围里就报错，让 AI 跟用户说清楚
+                if (args.TryGetProperty("dance_strength", out var strength) && strength.ValueKind == JsonValueKind.String)
+                    settings.DanceStrength = Array.IndexOf(Dance.Strengths, strength.GetString()) >= 0 ? strength.GetString()! : throw new ArgumentException("dance_strength 只能是 soft（柔和）、normal（标准）、strong（激烈）。");
                 if (args.TryGetProperty("sleep_at", out var sleepAt) && sleepAt.ValueKind == JsonValueKind.String)
                     settings.SleepAt = Alarms.SleepTime(sleepAt.GetString()) ?? throw new ArgumentException("sleep_at 写成 23:45 这样，只能在 22:00–02:00 之间（15 分钟一档）。");
                 if (args.TryGetProperty("lunch_at", out var lunchAt) && lunchAt.ValueKind == JsonValueKind.String)
@@ -1735,7 +1737,7 @@ internal sealed partial class PetWindow : Window
     {
         shape = settings.Shape, shapeLabel = Shape.Label, wearing = Wearing(), fps = settings.Fps, scale = settings.Scale, tex_scale = settings.TexScale, bubble_scale = settings.BubbleScale, bubble_seconds = settings.BubbleSeconds,
         hide_on_fullscreen = settings.HideOnFullscreen, hidden_for_fullscreen = hiddenForFullscreen && !standby, hidden = standby, start_hidden = settings.StartHidden, keep_on_screen = settings.KeepOnScreen, follow_mouse = settings.FollowMouse,
-        check_updates = settings.CheckUpdates, music_dance = settings.MusicDance, dance_music_apps = settings.DanceMusicApps, dance_browser = settings.DanceBrowser, coax_sleep = settings.CoaxSleep, coax_lunch = settings.CoaxLunch, sleep_at = settings.SleepAt, lunch_at = settings.LunchAt, birthday = settings.Birthday,
+        check_updates = settings.CheckUpdates, music_dance = settings.MusicDance, dance_music_apps = settings.DanceMusicApps, dance_browser = settings.DanceBrowser, dance_strength = settings.DanceStrength, coax_sleep = settings.CoaxSleep, coax_lunch = settings.CoaxLunch, sleep_at = settings.SleepAt, lunch_at = settings.LunchAt, birthday = settings.Birthday,
         update = updates.Latest is { } found ? new { current = found.Current, latest = found.Latest, behind = found.Behind, changes = found.Changes, guide = found.Guide } : null,
         idle_seconds = settings.IdleSeconds, position = new { Left, Top }, saying = speech.IsSaying, reaction = behavior.Showing, trouble,
         clothes = Outfit.Clothes.Select(item => item.Label).ToArray(), accessories = Outfit.Accessories.Select(item => item.Label).ToArray(),

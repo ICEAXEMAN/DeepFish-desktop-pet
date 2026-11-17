@@ -263,6 +263,9 @@
                                         <TextBlock Text="识别浏览器网页声音" VerticalAlignment="Center" Foreground="{StaticResource SubBrush}"/>
                                         <ToggleButton x:Name="SwDanceBrowser" Style="{StaticResource Switch}" HorizontalAlignment="Right"/>
                                     </Grid>
+                                    <!-- 摇摆强度（2026-11-18）：柔和（默认）/ 标准 / 激烈，听摇滚、电子可以选激烈 -->
+                                    <TextBlock Text="摇摆强度" Style="{StaticResource Caption}" Margin="0,8,0,0"/>
+                                    <Border x:Name="StrengthHost" Background="#6608102F" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="10" Margin="0,8,0,6"/>
                                 </StackPanel>
                                 <Grid Margin="0,8">
                                     <TextBlock Text="视线跟着鼠标" VerticalAlignment="Center"/>
